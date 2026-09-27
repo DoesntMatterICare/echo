@@ -140,7 +140,10 @@ const SFX = {
   swish() { noise({ vol: .24, dur: .14, f0: 1400, f1: 6500, type: 'highpass', echo: .05 }); },
   kill(x, y) { const s = spat(x, y, 900); noise({ pan: s.pan, vol: .4 * s.vol, dur: .26, f0: 900, f1: 110, echo: .2 }); tone({ pan: s.pan, vol: .2 * s.vol, dur: .22, f0: 170, f1: 55, type: 'sawtooth', echo: .1 }); },
   bark(x, y) { const s = spat(x, y, 1300); tone({ pan: s.pan, vol: .2 * s.vol, dur: .12, f0: 330, f1: 250, type: 'sawtooth', echo: .45 }); tone({ pan: s.pan, vol: .2 * s.vol, dur: .2, f0: 290, f1: 170, type: 'sawtooth', echo: .45, delay: .13 }); },
-  hum(x, y) { const s = spat(x, y, 3000), v = .05 + .18 * s.vol; tone({ pan: s.pan, vol: v, dur: 1.4, f0: 440, attack: .3, echo: .6 }); tone({ pan: s.pan, vol: v * .6, dur: 1.3, f0: 659, attack: .35, echo: .6, delay: .09 }); },
+  hum(x, y) { // Lena's four notes
+    const s = spat(x, y, 3000), v = .04 + .15 * s.vol;
+    [440, 523.25, 659.25, 587.33].forEach((f, i) => tone({ pan: s.pan, vol: v, dur: 1.1, f0: f, type: 'triangle', attack: .01, echo: .65, delay: i * .3 }));
+  },
   boom(x, y) { const s = spat(x, y, 3000); noise({ pan: s.pan, vol: .9 * s.vol + .15, dur: 1.7, f0: 1500, f1: 45, echo: .8 }); tone({ pan: s.pan, vol: .8 * s.vol, dur: 1.1, f0: 70, f1: 22, echo: .3 }); },
   door(x, y) { const s = spat(x, y, 900); tone({ pan: s.pan, vol: .1 * s.vol, dur: .3, f0: 170, f1: 85, type: 'square', echo: .3 }); noise({ pan: s.pan, vol: .25 * s.vol, dur: .12, f0: 700, echo: .3 }); },
   pickup() { [660, 990, 1320].forEach((f, i) => tone({ vol: .16, dur: .14, f0: f, type: 'triangle', delay: i * .07, echo: .4 })); },
@@ -220,7 +223,7 @@ const LV = {
     [23.5, 33.6, 'F / RIGHT CLICK — KNIFE  ·  SILENT'],
     [27.5, 37.5, 'CLICK — SHOOT  ·  LIGHTS THE ROOM, WAKES THE HOUSE'],
     [23.5, 41.4, 'SPACE — DASH'],
-    [26.5, 29.0, 'THE KEYCARD HUMS  ·  FOLLOW THE COMPASS'],
+    [26.5, 29.0, 'THE KEYCARD HUMS HER SONG  ·  FOLLOW IT'],
     [50.5, 27.5, 'GUNNERS FIRE AT WHAT THEY HEARD'],
     [51, 36.1, 'SHOOT RED BARRELS'],
     [6, 17.5, 'E — THROW DECOY  ·  BE LOUD SOMEWHERE ELSE'],
@@ -2356,7 +2359,7 @@ function drawTitle() {
   text('ENTER THE DARK', bx + 24 * s, byy + bh / 2, 20 * s, CARR[3], 1, 'left', 700, `${6 * s}px`);
   ctx.fillStyle = rgba(CARR[0], 1); ctx.beginPath(); const ax = bx + bw - 30 * s + (hov ? 6 * s : 0);
   ctx.moveTo(ax, byy + bh / 2 - 7 * s); ctx.lineTo(ax + 10 * s, byy + bh / 2); ctx.lineTo(ax, byy + bh / 2 + 7 * s); ctx.fill();
-  text('LEVEL 01  ·  ' + LV.name + '   ·   🎧 HEADPHONES RECOMMENDED', x0, byy + bh + 22 * s, 11 * s, CARR[3], .45, 'left', 600, `${3 * s}px`);
+  text('PROLOGUE  +  LEVEL 01  ·  ' + LV.name + '   ·   🎧 HEADPHONES RECOMMENDED', x0, byy + bh + 22 * s, 11 * s, CARR[3], .45, 'left', 600, `${3 * s}px`);
   // controls panel
   const rows = [
     ['WASD', 'Move — every step is a sound'], ['SHIFT', 'Run — faster, louder'], ['SPACE', 'Dash — brief invulnerability'],
@@ -2478,6 +2481,7 @@ function frame(now) {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  if (state === 'prologue') { mctx.setTransform(1, 0, 0, 1, 0, 0); mctx.fillStyle = '#000'; mctx.fillRect(0, 0, cv.width, cv.height); requestAnimationFrame(frame); return; }
   if (state === 'title') { drawWorld(false); ctx = plx; plx.setTransform(DPR, 0, 0, DPR, 0, 0); drawTitle(); drawCursor(); ctx = wctx; composite(); requestAnimationFrame(frame); return; }
   drawWorld(true);
   ctx = plx; plx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -2493,6 +2497,12 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+function beginPrologue() {
+  initAudio();
+  if (!window.EchoPrologue) { startGame(false); return; }
+  state = 'prologue';
+  window.EchoPrologue.play(() => startGame(false));
+}
 function startGame(fromCheckpoint) {
   initAudio();
   if (!fromCheckpoint) checkpoint = null;
@@ -2506,7 +2516,8 @@ addEventListener('keydown', e => {
   if (e.repeat) { K[c] = true; return; }
   K[c] = true;
   if (c === 'KeyM') { AU.muted = !AU.muted; if (AU.master) AU.master.gain.value = AU.muted ? 0 : .85; return; }
-  if (state === 'title') { if (c === 'Enter' || c === 'Space') startGame(false); return; }
+  if (state === 'prologue') return;
+  if (state === 'title') { if (c === 'Enter' || c === 'Space') beginPrologue(); return; }
   if (state === 'dead' && c === 'KeyR') { startGame(!!checkpoint); return; }
   if (state === 'win' && c === 'KeyR') { startGame(false); return; }
   if (state === 'paused') { if (c === 'Escape' || c === 'KeyP') state = 'playing'; else if (c === 'KeyR') startGame(false); return; }
@@ -2519,7 +2530,8 @@ addEventListener('keyup', e => { K[e.code] = false; });
 cv.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
 cv.addEventListener('mousedown', e => {
   mouse.x = e.clientX; mouse.y = e.clientY;
-  if (state === 'title') { startGame(false); return; }
+  if (state === 'title') { beginPrologue(); return; }
+  if (state === 'prologue') return;
   initAudio();
   if (e.button === 0) { mouse.down = true; mouse.pressed = true; }
   if (e.button === 2) mouse.rpressed = true;
@@ -2535,5 +2547,8 @@ player.x = -9999; player.y = -9999;
 state = 'title';
 requestAnimationFrame(frame);
 </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="prologue.js"></script>
 </body>
 </html>
