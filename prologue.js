@@ -883,13 +883,15 @@
       const finish = () => {
         if (s.done) return; s.done = true;
         if (s.exit) s.exit(); s.exit = null;
+        if (window.echoVoiceStop) window.echoVoiceStop();
         setLeaving(true); setTimeout(onDone, 900);
       };
       const go = n => {
         if (s.done) return;
         if (s.exit) s.exit(); s.exit = null;
         if (n >= SCENES.length) return finish();
-        s.si = n; s.t0 = performance.now(); s.fired = new Set(); s.mem = {}; s.last = 0;
+        s.si = n; s.t0 = performance.now(); s.fired = new Set(); s.mem = {}; s.last = 0; s.spoken = new Set();
+        if (window.echoVoiceStop) window.echoVoiceStop();
         setSi(n); setT(0);
         if (SCENES[n].enter) s.exit = SCENES[n].enter(s.mem) || null;
       };
@@ -901,9 +903,11 @@
       const cv = canvasRef.current, ctx = cv.getContext('2d'), post = makePost();
       const size = () => {
         const d = Math.min(devicePixelRatio || 1, 2); s.dpr = d;
-        cv.width = post.buf.width = innerWidth * d; cv.height = post.buf.height = innerHeight * d;
-        post.b1.width = Math.ceil(innerWidth / 4); post.b1.height = Math.ceil(innerHeight / 4);
-        post.b2.width = Math.ceil(innerWidth / 10); post.b2.height = Math.ceil(innerHeight / 10);
+        // never 0×0 (a hidden or minimised window would make drawImage throw and kill the loop)
+        const w = Math.max(16, innerWidth), hh = Math.max(16, innerHeight);
+        cv.width = post.buf.width = w * d; cv.height = post.buf.height = hh * d;
+        post.b1.width = Math.ceil(w / 4); post.b1.height = Math.ceil(hh / 4);
+        post.b2.width = Math.ceil(w / 10); post.b2.height = Math.ceil(hh / 10);
       };
       size(); addEventListener('resize', size);
 
@@ -912,6 +916,9 @@
         if (s.hold != null) s.t0 = now - s.hold * 1000;
         const sc = SCENES[s.si], tt = (now - s.t0) / 1000, dt = Math.min(.05, Math.max(0, tt - s.last)); s.last = tt;
         sc.cues.forEach((c, i) => { if (tt >= c.at && !s.fired.has(i)) { s.fired.add(i); try { c.fn(); } catch (e) {} } });
+        // voice: each subtitle line is spoken once, as it appears (narration is Elias)
+        const vl = lineState(sc, tt);
+        if (vl && !s.spoken.has(vl.i) && tt - vl.at < .4) { s.spoken.add(vl.i); if (window.echoSpeak) window.echoSpeak(vl.who || 'ECHO', vl.text, { ch: 'prologue' }); }
         const W = innerWidth, H = innerHeight, d = s.dpr, g = post.bx;
         g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
         g.fillStyle = '#000'; g.fillRect(0, 0, post.buf.width, post.buf.height);
@@ -956,8 +963,27 @@
 
   // ---------- public API ----------
   let root = null, host = null;
+  // give every voiced line room to finish: push later lines back and stretch the scene if needed
+  function voiceRetime() {
+    const V = window.VO_LINES; if (!V) return;
+    for (const sc of SCENES) {
+      if (!sc.lines || !sc.lines.length) continue;
+      sc.dur0 = sc.dur0 ?? sc.dur;
+      let shift = 0, prevEnd = 0;
+      for (const ln of sc.lines) {
+        ln.at0 = ln.at0 ?? ln.at;
+        let at = ln.at0 + shift;
+        if (at < prevEnd) { shift += prevEnd - at; at = prevEnd; }
+        ln.at = at;
+        const e = V[(ln.who || 'ECHO') + '|' + ln.text];
+        prevEnd = at + (e ? e.d : 1.5) + .35;
+      }
+      sc.dur = Math.max(sc.dur0, prevEnd + .6);
+    }
+  }
   window.EchoPrologue = {
     play(onDone) {
+      voiceRetime();
       if (!document.getElementById('pr-style')) { const st = document.createElement('style'); st.id = 'pr-style'; st.textContent = CSS; document.head.appendChild(st); }
       host = document.createElement('div'); host.id = 'prologue-root'; document.body.appendChild(host);
       root = ReactDOM.createRoot(host);

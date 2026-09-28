@@ -13,6 +13,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<script src="assets/voice/vo.js?v=2"></script>
 <script>
 'use strict';
 // =====================================================================
@@ -32,7 +33,7 @@ const HAS_FILTER = 'filter' in b1x;
 let W, H, DPR, Z = 1, vignette = null, grain = null;
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
-  W = innerWidth; H = innerHeight;
+  W = Math.max(16, innerWidth); H = Math.max(16, innerHeight); // a 0×0 window would make drawImage throw and stop the loop
   cv.width = wc.width = plc.width = W * DPR; cv.height = wc.height = plc.height = H * DPR;
   cv.style.width = W + 'px'; cv.style.height = H + 'px';
   b1.width = Math.ceil(W / 4); b1.height = Math.ceil(H / 4);
@@ -159,6 +160,16 @@ const SFX = {
   dash() { noise({ vol: .16, dur: .2, f0: 700, f1: 2600, type: 'bandpass', q: 1, echo: .1 }); },
   death() { tone({ vol: .35, dur: 1.4, f0: 300, f1: 38, type: 'sawtooth', echo: .9 }); },
   win() { [392, 523, 659, 784, 1046].forEach((f, i) => tone({ vol: .16, dur: .8, f0: f, type: 'triangle', delay: i * .12, echo: .8 })); },
+  crunch(x, y) { const s = spat(x, y, 900); noise({ pan: s.pan, vol: .3 * s.vol, dur: .09, f0: 5200, type: 'highpass', echo: .15 }); noise({ pan: s.pan, vol: .22 * s.vol, dur: .07, f0: 3400, type: 'bandpass', q: 2, echo: .15, delay: .045 }); },
+  beep(x, y) { const s = spat(x, y, 700); tone({ pan: s.pan, vol: .1 * s.vol, dur: .05, f0: 2900, type: 'square', echo: .15 }); },
+  arm(x, y) { const s = spat(x, y, 900); noise({ pan: s.pan, vol: .3 * s.vol, dur: .03, f0: 4000, type: 'highpass', echo: 0 }); tone({ pan: s.pan, vol: .2 * s.vol, dur: .45, f0: 1800, f1: 3400, type: 'square', echo: .2 }); },
+  bell(x, y) { const s = spat(x, y, 2600); for (let i = 0; i < 6; i++) tone({ pan: s.pan, vol: (.22 * s.vol + .06) * (1 - i * .12), dur: .5, f0: i % 2 ? 2217 : 1760, type: 'triangle', delay: i * .11, echo: .8 }); },
+  jam(v) { noise({ vol: v * .3, dur: .4, f0: rand(1500, 4000), type: 'bandpass', q: .8, echo: .1 }); tone({ vol: v * .12, dur: .3, f0: 90, f1: 60, type: 'square', echo: 0 }); },
+  nodeHum(x, y) { const s = spat(x, y, 900); tone({ pan: s.pan, vol: .08 * s.vol, dur: .7, f0: 110, f1: 104, type: 'square', echo: .3, attack: .05 }); tone({ pan: s.pan, vol: .05 * s.vol, dur: .5, f0: 880, f1: 1320, type: 'triangle', echo: .4, delay: .1 }); },
+  nodeDown(x, y) { const s = spat(x, y, 1200); tone({ pan: s.pan, vol: .3 * s.vol + .05, dur: .8, f0: 900, f1: 40, type: 'sawtooth', echo: .6 }); noise({ pan: s.pan, vol: .35 * s.vol, dur: .35, f0: 3000, f1: 300, echo: .4 }); },
+  disarm() { [1400, 1900].forEach((f, i) => tone({ vol: .12, dur: .08, f0: f, type: 'triangle', delay: i * .07, echo: .3 })); noise({ vol: .12, dur: .03, f0: 4500, type: 'highpass', echo: 0 }); },
+  phantom() { tone({ vol: .16, dur: .6, f0: 300, f1: 1250, type: 'sine', echo: .85 }); tone({ vol: .08, dur: .9, f0: 1560, f1: 1500, type: 'triangle', echo: .9, delay: .12 }); },
+  shatter(x, y) { const s = spat(x, y, 1600); noise({ pan: s.pan, vol: .4 * s.vol + .06, dur: .45, f0: 6000, f1: 1800, type: 'highpass', echo: .6 }); [2093, 2637, 3136].forEach((f, i) => tone({ pan: s.pan, vol: .1 * s.vol + .03, dur: .6, f0: f, type: 'triangle', delay: i * .04, echo: .8 })); },
   ui() { tone({ vol: .08, dur: .06, f0: 1800, type: 'triangle', echo: .1 }); },
 };
 
@@ -205,6 +216,8 @@ const LV = {
     { t: 'hunter', x: 4, y: 4, f: 0 },
     { t: 'assassin', x: 18, y: 2, p: [[18, 2], [43, 3]] },
     { t: 'hunter', x: 40, y: 5, f: -PI / 2 },
+    { t: 'jammer', x: 53, y: 21, p: [[53, 21], [48, 21]] },
+    { t: 'jammer', x: 27, y: 24, f: -PI / 2 },
   ],
   pickups: [
     ['ammo', 21, 40], ['shotgun', 59, 41], ['ammo', 48, 32], ['med', 43, 41],
@@ -226,9 +239,21 @@ const LV = {
     [6, 17.5, 'E — THROW DECOY  ·  BE LOUD SOMEWHERE ELSE'],
     [5.5, 8, 'SOMETHING HERE MAKES NO SOUND'],
     [9, 13.6, 'OPEN DOORS FAST — SLAM THEM INTO FACES'],
+    [15.5, 38.6, 'G — PHANTOM  ·  A FALSE ECHO THEY CHASE'],
+    [32.5, 34.2, 'GLASS  ·  DASH ACROSS IT'],
+    [38.5, 36.6, 'BEEPING = MINE  ·  KNIFE DISARMS'],
+    [50.5, 30.4, 'TRIPWIRE AHEAD  ·  KNIFE CUTS IT'],
+    [53.5, 31.6, 'STATIC = JAMMER  ·  BREAK IT'],
   ],
   start: [3, 37],
   exit: [2, 35, 3, 4], // Marcus's extraction, back where you came in
+  // hazards: glass [x,y,w,h] · mine [x,y] · wire [x1,y1,x2,y2] (tile units)
+  traps: [
+    ['glass', 33, 36, 3, 2], ['mine', 46, 36], ['wire', 50, 25.5, 52, 25.5], ['glass', 48, 17, 3, 3], ['mine', 57, 20],
+    ['wire', 40.5, 18, 40.5, 20], ['glass', 25, 23, 3, 2], ['mine', 33, 13], ['wire', 13.5, 17, 13.5, 19],
+    ['glass', 2, 20, 2, 3], ['mine', 8, 16], ['wire', 5, 8.5, 7, 8.5], ['glass', 9, 1, 2, 2], ['wire', 25.5, 2, 25.5, 4], ['mine', 28, 3],
+  ],
+  jammers: [[59, 31], [2, 25], [38, 2]],
 };
 
 const ETYPE = {
@@ -236,6 +261,7 @@ const ETYPE = {
   gunner:   { hp: 1, walk: 68, run: 140, ear: 1.0, stepR: 80, stride: 44, stepVol: .3, r: 13, pts: 350, w: 'rifle' },
   assassin: { hp: 1, walk: 92, run: 235, ear: 1.3, stepR: 0, stride: 50, stepVol: .06, r: 12, pts: 500, w: 'blade' },
   heavy:    { hp: 6, walk: 52, run: 82, ear: 0.9, stepR: 210, stride: 52, stepVol: .7, r: 18, pts: 1000, w: 'heavygun' },
+  jammer:   { hp: 1, walk: 72, run: 165, ear: 1.1, stepR: 90, stride: 44, stepVol: .32, r: 13, pts: 450, w: 'bat' },
   boss:     { hp: 28, walk: 105, run: 150, ear: 1.5, stepR: 170, stride: 50, stepVol: .6, r: 20, pts: 5000, w: 'heavygun' },
 };
 const WEAP = {
@@ -391,6 +417,7 @@ function buildLevel(cp) {
   compass = { a: 0, t: -99, d: 0 };
   timers.push({ t: time + 0.5, fn: () => { emitSound(player.x, player.y, { hear: 0, reveal: 520, col: 0, owner: 'player', str: .9 }); SFX.sonar(); } });
   showMsg(cp ? 'CHECKPOINT' : 'PRESS  Q  TO PING', 0);
+  buildGadgets(cp);
   initPhases(cp);
 }
 
@@ -401,6 +428,7 @@ function saveCheckpoint() {
     dead: enemies.filter(e => e.dead).map(e => e.id),
     taken: pickups.filter(p => p.taken).map(p => p.id),
     barrels: barrels.filter(b => b.gone).map(b => b.id),
+    blind: MS.blind, traps: traps.filter(t => t.gone).map(t => t.id), jams: jams.filter(j => j.k === 'node' && j.gone).map(j => j.id),
     p: { x: P.x, y: P.y, hp: P.hp, weapon: P.weapon, owned: { ...P.owned }, ammo: JSON.parse(JSON.stringify(P.ammo)), decoys: P.decoys },
   };
 }
@@ -430,6 +458,8 @@ function revealWave(x, y, R, str, col) {
   for (const e of enemies) sch(e, e.x, e.y);
   for (const p of pickups) if (!p.taken) sch(p, p.x, p.y);
   for (const b of barrels) if (!b.gone) sch(b, b.x, b.y);
+  for (const t of traps) if (!t.gone) sch(t, t.x, t.y);
+  for (const j of jams) if (!j.gone && j.k === 'node') sch(j, j.x, j.y);
   sch(exitObj, exitObj.x, exitObj.y);
 }
 function fireReveal(o) {
@@ -445,6 +475,8 @@ function updReveals() {
   for (const d of doors) fireReveal(d);
   for (const p of pickups) fireReveal(p);
   for (const b of barrels) fireReveal(b);
+  for (const t of traps) fireReveal(t);
+  for (const j of jams) if (j.k === 'node') fireReveal(j);
   fireReveal(exitObj);
   for (const e of enemies) if (fireReveal(e)) {
     e.gx = e.x; e.gy = e.y; e.ga = e.a; e.gw = e.walk; e.gmove = e.moveAmt;
@@ -454,6 +486,7 @@ function updReveals() {
 function swingOf(e) { const a = time - e.swingT; return a >= 0 && a < .22 ? a / .22 : -1; }
 
 function emitSound(x, y, o) {
+  if (player && player.deafT > 0 && o.reveal > 0) o = { ...o, reveal: o.reveal * .3 }; // deafened: every echo is short
   const dp = Math.hypot(x - player.x, y - player.y);
   const aud = o.force || o.owner === 'player' || dp < Math.max(o.hear || 0, o.reveal || 0) * 1.5 + 320;
   if (aud && o.reveal > 0) {
@@ -556,9 +589,14 @@ function alertEnemy(e, shout) {
 function bark(e) {
   if (time - e.lastBark < 3) return;
   e.lastBark = time;
+  if (MS.blind && Math.random() < .7) { // they've learned: hand signals, not shouts
+    popups.push({ x: e.x, y: e.y - 30, text: '· · ·', t: time, c: 1, size: 14, vy: -10 });
+    for (const o of enemies) if (!o.dead && o !== e && (o.state === 'patrol' || o.state === 'return') && Math.hypot(o.x - e.x, o.y - e.y) < 330) { o.know = { ...e.know, t: time }; o.state = 'hunt'; o.path = null; }
+    return;
+  }
   emitSound(e.x, e.y, { hear: 0, reveal: 120, col: 1, owner: 'enemy', str: .85, ind: true });
   popups.push({ x: e.x, y: e.y - 30, text: e.type === 'heavy' ? '!!' : '!', t: time, c: 1, size: 24, vy: -14, alert: true });
-  SFX.bark(e.x, e.y);
+  if (!say(e, 'alert')) SFX.bark(e.x, e.y);
   for (const o of enemies) if (!o.dead && o !== e && (o.state === 'patrol' || o.state === 'return') && Math.hypot(o.x - e.x, o.y - e.y) < 330) {
     o.know = { ...e.know, t: time }; o.state = 'hunt'; o.path = null;
   }
@@ -568,10 +606,11 @@ function enemyStep(e, moved, running) {
   e.stepAcc += moved; e.walk += moved * .13;
   if (e.stepAcc < ty.stride) return;
   e.stepAcc = 0;
-  if (ty.stepR > 0) emitSound(e.x, e.y, { hear: 0, reveal: ty.stepR * (running ? 1.25 : 1), col: 1, owner: 'enemy', str: .55, trail: true, ind: e.type === 'heavy' });
+  const gl = glassAt(e.x, e.y); if (gl) glassCrunch(gl, e.x, e.y, false);
+  if (ty.stepR > 0) emitSound(e.x, e.y, { hear: 0, reveal: ty.stepR * (running ? 1.25 : 1) * (e.quiet ? .3 : 1), col: 1, owner: 'enemy', str: .55, trail: true, ind: e.type === 'heavy' });
   else if (Math.hypot(e.x - player.x, e.y - player.y) < 170 && running) trails.push({ x: e.x, y: e.y, t: time, c: 1 });
   if (e.type === 'heavy' && Math.hypot(e.x - player.x, e.y - player.y) < 700) { shake = Math.max(shake, 1.5); ring(e.x, e.y, 6, 40, 1, .5, 1.5); }
-  SFX.step(e.x, e.y, ty.stepVol * (running ? 1.3 : 1), e.type === 'heavy');
+  SFX.step(e.x, e.y, ty.stepVol * (running ? 1.3 : 1) * (e.quiet ? .35 : 1), e.type === 'heavy');
 }
 function navTo(e, gx, gy, spd, dt) {
   const dg = Math.hypot(gx - e.x, gy - e.y);
@@ -628,7 +667,7 @@ function meleeStrike(e) {
   e.swingT = time;
   emitSound(e.x, e.y, { hear: 0, reveal: 90, col: 1, owner: 'enemy', str: .9 });
   sparks(e.x + Math.cos(e.a) * 24, e.y + Math.sin(e.a) * 24, e.a, 6, 1, 250, 1.2);
-  if (d < (e.type === 'heavy' ? 58 : 50) && !P.dead) damagePlayer(e.type === 'hunter' ? 1 : 2, e.x, e.y);
+  if (d < (e.type === 'heavy' ? 58 : 50) && !P.dead) damagePlayer(e.type === 'hunter' || e.type === 'jammer' ? 1 : 2, e.x, e.y);
   e.state = 'hunt'; e.cd = .8;
 }
 
@@ -637,7 +676,12 @@ function updEnemy(e, dt) {
   const P = player, ty = ETYPE[e.type];
   e.cd -= dt; e.recoil = Math.max(0, e.recoil - dt * 7); e.moveAmt = Math.max(0, e.moveAmt - dt * 3);
   if (e.flinch > 0) { e.flinch -= dt; return; }
-  if (e.state === 'stun') { e.stunT -= dt; if (e.stunT <= 0) { e.state = 'hunt'; e.know = { x: P.x, y: P.y, t: time }; e.path = null; } return; }
+  if (e.state === 'stun') { e.stunT -= dt; if (e.stunT <= 0) { e.path = null; if (e.pstun) { e.pstun = false; e.state = 'search'; e.searchT = 3; e.wgoal = null; } else { e.state = 'hunt'; e.know = { x: P.x, y: P.y, t: time }; } } return; }
+  if (e.sideT > 0) { // dodging the ping: the echo shows where they WERE
+    e.sideT -= dt; const ox = e.x, oy = e.y;
+    moveCircle(e, Math.cos(e.sideA) * ty.run * dt, Math.sin(e.sideA) * ty.run * dt, e.r, false);
+    e.walk += Math.hypot(e.x - ox, e.y - oy) * .13; e.moveAmt = 1; e.a = turnTo(e.a, e.sideA, dt * 10); return;
+  }
   const dP = Math.hypot(P.x - e.x, P.y - e.y);
   if (!P.dead) {
     let sr = P.speedNow > 200 ? 135 : P.speedNow > 30 ? 82 : 46;
@@ -648,6 +692,7 @@ function updEnemy(e, dt) {
     }
   }
   const age = e.know ? time - e.know.t : 999;
+  if (e.type === 'jammer') updJammer(e, dt, age);
   switch (e.state) {
     case 'windup': e.wT -= dt; e.a = turnTo(e.a, Math.atan2(P.y - e.y, P.x - e.x), dt * 7); if (e.wT <= 0) meleeStrike(e); return;
     case 'aim':
@@ -713,14 +758,16 @@ function updEnemy(e, dt) {
     }
   } else if (e.state === 'hunt') {
     if (!e.know) { e.state = 'return'; return; }
+    if (e.order) { if (time > e.order.end) e.order = null; else { followOrder(e, ty, dt); return; } }
+    if (e.rushT > time && e.rushTrack) e.know = { x: P.x, y: P.y, t: time };
     let go = true;
     if (e.type === 'gunner' && age < 2.4) {
       const dk = Math.hypot(e.know.x - e.x, e.know.y - e.y);
       if (dk < 300 && los(e.x, e.y, e.know.x, e.know.y)) go = false;
     }
     if (go) {
-      const r = navTo(e, e.know.x, e.know.y, ty.run, dt);
-      if (r === true || r === 'fail') { e.state = 'search'; e.searchT = rand(4, 6); e.wanderT = 0; }
+      const r = navTo(e, e.know.x, e.know.y, ty.run * (e.rushT > time ? 1.25 : e.quiet ? .8 : 1), dt);
+      if (r === true || r === 'fail') { e.state = 'search'; e.searchT = rand(4, 6); e.wanderT = 0; e.rushT = 0; squadOnSearch(e); }
     } else e.a = turnTo(e.a, Math.atan2(e.know.y - e.y, e.know.x - e.x), dt * 8);
   } else if (e.state === 'search') {
     e.searchT -= dt; e.wanderT -= dt;
@@ -900,6 +947,8 @@ function melee() {
   for (const d of doors) if (!d.open && Math.hypot(d.x - (P.x + Math.cos(P.a) * 30), d.y - (P.y + Math.sin(P.a) * 30)) < 40) {
     const s = P.speedNow; P.speedNow = 260; tryOpenDoor(d, P, true); P.speedNow = s; break;
   }
+  knifeGadgets(P);
+  fakeHit(P.x + Math.cos(P.a) * 30, P.y + Math.sin(P.a) * 30, 42);
   let best = null, bd = 1e9;
   for (const e of enemies) if (!e.dead) {
     const d = Math.hypot(e.x - P.x, e.y - P.y);
@@ -920,11 +969,14 @@ function melee() {
 function sonar() {
   const P = player;
   if (P.sonarCD > 0) return;
+  if (P.jammed) { P.sonarCD = .7; return jamFizzle('SONAR'); }
   P.sonarCD = 3.2; stats.pings++;
   emitSound(P.x, P.y, { hear: 720, reveal: 1000, col: 0, owner: 'player', str: 1.05 });
   markFromSonar();
+  squadOnPing();
   const poly = waves[waves.length - 1].poly;
-  waves.push({ x: P.x, y: P.y, r: -90, max: 1000, c: 0, s: .6, poly, big: true }, { x: P.x, y: P.y, r: -190, max: 1000, c: 0, s: .35, poly, big: true });
+  const wm = P.deafT > 0 ? 300 : 1000;
+  waves.push({ x: P.x, y: P.y, r: -90, max: wm, c: 0, s: .6, poly, big: true }, { x: P.x, y: P.y, r: -190, max: wm, c: 0, s: .35, poly, big: true });
   light(P.x, P.y, 260, 0, .5, 1);
   ring(P.x, P.y, 10, 90, 3, .4, 3);
   zoomPunch = Math.min(zoomPunch, -.05);
@@ -982,6 +1034,7 @@ function collect(p) {
       P.key = true; for (const d of doors) if (d.locked) d.locked = false;
       showMsg('VAULT KEYCARD ACQUIRED', 2); SFX.key(); humT = .6; MS.phase = 'vault';
       radio('MARCUS', "That's the vault key. The Conductor's in there with the ledger — he's the one who gave the order, Elias.");
+      radio('ECHO', "Then that's where I'm going.");
       stats.score += 1000;
       p.taken = true; saveCheckpoint();
       ring(p.x, p.y, 8, 140, 2, .7, 3); light(p.x, p.y, 260, 2, .7, 1);
@@ -1026,7 +1079,9 @@ function updPlayer(dt) {
     const stride = P.running ? 58 : 46;
     if (P.stepAcc > stride) {
       P.stepAcc = 0;
-      if (P.running) emitSound(P.x, P.y, { hear: 270, reveal: 215, col: 0, owner: 'player', str: .7, trail: true });
+      const gl = glassAt(P.x, P.y);
+      if (gl) glassCrunch(gl, P.x, P.y, true, P.running);
+      else if (P.running) emitSound(P.x, P.y, { hear: 270, reveal: 215, col: 0, owner: 'player', str: .7, trail: true });
       else emitSound(P.x, P.y, { hear: 100, reveal: 118, col: 0, owner: 'player', str: .5, trail: true });
       dust(P.x, P.y, 0);
       SFX.step(P.x, P.y, P.running ? .3 : .16, false);
@@ -1073,7 +1128,9 @@ function initPhases(cp) {
     escT: 0, sirenT: 0, spawnT: 0, nid: 0, boss: null, shocks: [], target: null, deathMsg: null, sirenPulse: -9,
     said: {}, bossDown: false, ledger: false, clearT: -9,
   };
+  initSquad(cp);
   if (!cp) timers.push({ t: time + 4.6, fn: () => radio('MARCUS', "You're in. The vault key is somewhere on this floor — listen for it. Ping them, then strike before they move.") });
+  if (!cp) timers.push({ t: time + 11, fn: () => radio('ECHO', 'I hear them. Every one of them.') });
   if (cp && cp.phase === 'boss') timers.push({ t: time + .15, fn: startBoss });
   if (cp && cp.phase === 'escape') {
     MS.bossDown = true; MS.ledger = true; MS.phase = 'ledger';
@@ -1105,8 +1162,9 @@ function updRadio() {
   MS.radio = null;
   if (!MS.rq.length) return;
   const r = MS.rq.shift();
-  MS.radio = { ...r, t: realT, dur: 2.4 + r.text.length / 19 };
-  if (AU.ctx && !AU.muted) noise({ vol: .1, dur: .22, f0: 2400, type: 'bandpass', q: 3, echo: 0 });
+  const vd = speak(r.who, r.text);
+  MS.radio = { ...r, t: realT, dur: Math.max(2.4 + r.text.length / 19, vd + .8) };
+  if (AU.ctx && !AU.muted && r.who !== 'ECHO') noise({ vol: .1, dur: .22, f0: 2400, type: 'bandpass', q: 3, echo: 0 });
 }
 function callout(text, sub, col, big) { MS.call = { text, sub: sub || '', col: col ?? 0, t: realT, big: !!big }; }
 
@@ -1117,12 +1175,13 @@ function markFromSonar() {
   for (const e of enemies) {
     if (e.dead || e.hidden) continue;
     const d = Math.hypot(e.x - P.x, e.y - P.y);
-    if (d > 1000 || !los(P.x, P.y, e.x, e.y)) continue;
+    if (d > (P.deafT > 0 ? 300 : 1000) || !los(P.x, P.y, e.x, e.y) || jamAt(e.x, e.y) > .5) continue;
     e.markT = time + d / WAVE_SPEED; e.markEnd = e.markT + (e.type === 'boss' ? 3.2 : 4.5);
   }
 }
 function strikeTarget() {
   const P = player, mw = screenToWorld(mouse.x, mouse.y);
+  if (P.jammed) return null;
   let best = null, bs = 1e9;
   for (const e of enemies) {
     if (e.dead || e.hidden || !isMarked(e) || (e.strikeCD || 0) > time) continue;
@@ -1179,6 +1238,7 @@ function onKill(e, cause) {
   MS.recent.push({ t: time, x: e.x, y: e.y });
   MS.recent = MS.recent.filter(r => time - r.t < 10);
   if (e.type === 'boss') return bossDown(e);
+  squadOnKill(e);
   const burst = MS.recent.filter(r => time - r.t < 1.3).length;
   if (burst >= 2) {
     const names = ['', '', 'DOUBLE ECHO', 'TRIPLE ECHO', 'QUAD ECHO'];
@@ -1229,6 +1289,7 @@ function startBoss() {
   slowT = Math.max(slowT, 1); shake = Math.max(shake, 12);
   SFX.door(player.x, player.y); SFX.boom(e.x, e.y);
   radio('CONDUCTOR', 'Calder. I still remember her song. Four notes, wasn\'t it?');
+  radio('ECHO', 'You should have finished it.');
   radio('MARCUS', "Don't let him in your head. He's blind too — make him listen to the wrong thing.");
   saveCheckpoint();
 }
@@ -1260,10 +1321,11 @@ function bossVanish(e) {
   smoke(e.x, e.y, 10, 1.2); ring(e.x, e.y, 10, 140, 1, .5, 3);
   popups.push({ x: e.x, y: e.y - 44, text: 'SILENCE', t: time, c: 1, size: 18, vy: -16, pop: true });
   bossSound('vanish', e);
+  bossFakes(e);
 }
 function summonAdds(e) {
   const [x0, y0, x1, y1] = BOSS.box, corners = [[x0 + .4, y0 + .4], [x1 - .4, y0 + .4], [x0 + .4, y1 - .4], [x1 - .4, y1 - .4]];
-  const types = ['hunter', 'hunter', 'assassin'];
+  const types = e.summons.length ? ['hunter', 'hunter', 'assassin'] : ['hunter', 'jammer', 'assassin'];
   corners.sort((a, b) => Math.hypot(b[0] * T - player.x, b[1] * T - player.y) - Math.hypot(a[0] * T - player.x, a[1] * T - player.y));
   types.forEach((ty, i) => {
     const [cx, cy] = corners[i], add = makeEnemy(ty, cx * T, cy * T, 'b' + (MS.nid++));
@@ -1285,7 +1347,7 @@ function bossHurt(e, dmg) {
   if (e.dmgAcc >= 6 && !e.hidden) { e.dmgAcc = 0; bossVanish(e); }
 }
 function updBoss(e, dt) {
-  const P = player, TY = ETYPE.boss;
+  const P = player, TY = ETYPE.boss, Q = phantom || player;
   e.cd -= dt; e.recoil = Math.max(0, e.recoil - dt * 6); e.moveAmt = Math.max(0, e.moveAmt - dt * 3);
   if (e.flinch > 0) e.flinch -= dt;
   const enr = e.hp <= e.maxhp * .5;
@@ -1301,13 +1363,13 @@ function updBoss(e, dt) {
     return;
   }
   // he hears your heartbeat: always knows roughly where you are
-  if (time > (e.trackT || 0)) { e.trackT = time + (enr ? .45 : .8); e.know = { x: P.x + rand(-26, 26), y: P.y + rand(-26, 26), t: time }; }
+  if (time > (e.trackT || 0)) { e.trackT = time + (enr ? .45 : .8); e.know = { x: Q.x + rand(-26, 26), y: Q.y + rand(-26, 26), t: time }; if (phantom && !MS.said.bossPh) { MS.said.bossPh = 1; callout('HE HEARS THE GHOST', 'STRIKE WHILE HE LISTENS', 0); } }
   if (time > (e.humT || 0)) {
     e.humT = time + 1.25;
     emitSound(e.x, e.y, { hear: 0, reveal: 150, col: 1, owner: 'enemy', str: .85 });
     bossSound('hum', e);
   }
-  const face = () => { e.a = turnTo(e.a, Math.atan2(P.y - e.y, P.x - e.x), dt * 8); };
+  const face = () => { e.a = turnTo(e.a, Math.atan2(Q.y - e.y, Q.x - e.x), dt * 8); };
   switch (e.state) {
     case 'windfan':
       e.wT -= dt; face();
@@ -1323,7 +1385,7 @@ function updBoss(e, dt) {
       return;
   }
   if (e.cd <= 0 && !P.dead) {
-    const d = Math.hypot(P.x - e.x, P.y - e.y), r = Math.random();
+    const d = Math.hypot(Q.x - e.x, Q.y - e.y), r = Math.random();
     if (d < 280 && r < .45) {
       e.state = 'windscream'; e.wT = e.wT0 = enr ? .75 : 1.05; bossSound('inhale', e);
       emitSound(e.x, e.y, { hear: 0, reveal: 200, col: 1, owner: 'enemy', str: .9, ind: true });
@@ -1335,8 +1397,8 @@ function updBoss(e, dt) {
   }
   // circle-strafe around the player, inside the vault
   if (Math.random() < dt * .25) e.orbit *= -1;
-  const [x0, y0, x1, y1] = BOSS.box, oa = Math.atan2(e.y - P.y, e.x - P.x) + e.orbit * .7;
-  const gx = clamp(P.x + Math.cos(oa) * 240, x0 * T, x1 * T), gy = clamp(P.y + Math.sin(oa) * 240, y0 * T, y1 * T);
+  const [x0, y0, x1, y1] = BOSS.box, oa = Math.atan2(e.y - Q.y, e.x - Q.x) + e.orbit * .7;
+  const gx = clamp(Q.x + Math.cos(oa) * 240, x0 * T, x1 * T), gy = clamp(Q.y + Math.sin(oa) * 240, y0 * T, y1 * T);
   navTo(e, gx, gy, enr ? TY.run : TY.walk, dt);
   face();
 }
@@ -1365,6 +1427,7 @@ function bossDown(e) {
   for (const d of doors) if (BOSS.doors.some(([x, y]) => d.tx === x && d.ty === y)) { d.locked = false; d.open = true; d.amt = 0; }
   for (const o of enemies) if (!o.dead && String(o.id)[0] === 'b') { o.hp = 1; damageEnemy(o, 9, 'blast', false); }
   pickups.push(revealable({ id: 'ledger', type: 'ledger', x: e.x, y: e.y, taken: false, c: 2 }));
+  radio('ECHO', 'That was for Lena.');
   radio('MARCUS', "It's done. Grab the ledger — every name is in it.");
   humT = 1.2;
 }
@@ -1375,6 +1438,7 @@ function startEscape(fromCp) {
   for (const e of enemies) if (!e.dead) { e.know = { x: player.x, y: player.y, t: time }; e.state = 'hunt'; e.path = null; }
   callout('ALARM', 'REACH MARCUS · 90 SECONDS', 1, true);
   radio('MARCUS', "Alarm's up — the whole building knows. I'm at the loading dock where you came in. Ninety seconds!");
+  radio('ECHO', 'Keep the engine running.');
   if (!fromCp) saveCheckpoint();
   humT = .3; shake = Math.max(shake, 10);
 }
@@ -1396,7 +1460,7 @@ function updEscape(dt) {
       const cands = SPAWNS.map(([x, y]) => ({ x: (x + .5) * T, y: (y + .5) * T })).filter(s => { const d = Math.hypot(s.x - player.x, s.y - player.y); return d > 420 && d < 1300; });
       for (let i = 0; i < 2 && cands.length; i++) {
         const s = cands.splice((Math.random() * cands.length) | 0, 1)[0];
-        const r = Math.random(), type = r < .55 ? 'hunter' : r < .85 ? 'gunner' : 'assassin';
+        const r = Math.random(), type = r < .5 ? 'hunter' : r < .78 ? 'gunner' : r < .9 ? 'jammer' : 'assassin';
         enemies.push(makeEnemy(type, s.x, s.y, 'r' + (MS.nid++)));
         emitSound(s.x, s.y, { hear: 0, reveal: 160, col: 1, owner: 'enemy', str: .9, ind: true });
         SFX.door(s.x, s.y);
@@ -1501,7 +1565,7 @@ function drawMissionHUD(S, pad) {
     if (a > 0) {
       const w = 470 * S, x = pad, hh = 78 * S, y = H - pad - 62 * S - 18 * S - hh;
       panel(x, y, w, hh, a);
-      const col = r.who === 'CONDUCTOR' ? CARR[1] : CARR[2];
+      const col = r.who === 'CONDUCTOR' ? CARR[1] : r.who === 'ECHO' ? CARR[0] : CARR[2];
       text(r.who, x + 16 * S, y + 16 * S, 10 * S, col, a, 'left', 700, `${5 * S}px`);
       for (let i = 0; i < 14; i++) { const v = (Math.sin(realT * 18 + i * 1.3) * .5 + .5) * (k * 45 < r.text.length ? 1 : .15); ctx.fillStyle = rgba(col, .7 * a); ctx.fillRect(x + w - 20 * S - i * 5 * S, y + 16 * S - v * 6 * S, 3 * S, v * 12 * S + 1); }
       ctx.font = `500 ${14 * S}px ${FONT}`;
@@ -1509,6 +1573,841 @@ function drawMissionHUD(S, pad) {
       let left = Math.floor(k * 45);
       lines.forEach((ln, i) => { const s = ln.slice(0, Math.max(0, left)); left -= ln.length + 1; if (s) text(s, x + 16 * S, y + 38 * S + i * 18 * S, 14 * S, CARR[3], a * .95, 'left', 500, '0.3px'); });
     }
+  }
+}
+
+// =====================================================================
+//  GADGETS & HAZARDS: PHANTOM PROJECTION · TRAPS · ECHO JAMMERS
+// =====================================================================
+const PHANTOM_CD = 11, PHANTOM_LIFE = 6.5, PHANTOM_R = 185;
+const VIO = [178, 92, 255];
+CARR[4] = VIO; // particle/ring colour only — reveals stay on colours 0-3 (floor buckets)
+const JAM_R = { node: 250, carrier: 200, field: 190 };
+let traps = [], jams = [], jamNades = [], phantom = null, jamK = 0, jamSfxT = 0, gprev = null, jamPat = null;
+
+function buildGadgets(cp) {
+  const gone = (list, id) => !!(cp && cp[list] && cp[list].includes(id));
+  traps = LV.traps.map((t, id) => {
+    const o = revealable({ id, k: t[0], gone: gone('traps', id), c: 1 });
+    if (o.k === 'wire') {
+      o.x1 = t[1] * T; o.y1 = t[2] * T; o.x2 = t[3] * T; o.y2 = t[4] * T; o.x = (o.x1 + o.x2) / 2; o.y = (o.y1 + o.y2) / 2;
+    } else if (o.k === 'glass') {
+      o.x0 = t[1] * T; o.y0 = t[2] * T; o.w = t[3] * T; o.h = t[4] * T; o.x = o.x0 + o.w / 2; o.y = o.y0 + o.h / 2; o.gone = false;
+      let s = id * 977 + 13; const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+      o.shards = [];
+      for (let i = 0, n = Math.round(t[3] * t[4] * 9); i < n; i++) o.shards.push({ x: o.x0 + 4 + rnd() * (o.w - 8), y: o.y0 + 4 + rnd() * (o.h - 8), r: 2.5 + rnd() * 5, a: rnd() * TAU, f: rnd() });
+    } else {
+      o.x = (t[1] + .5) * T; o.y = (t[2] + .5) * T; o.beepT = rand(0, 2); o.beepAt = -9; o.armT = -1;
+    }
+    return o;
+  });
+  jams = LV.jammers.map(([x, y], id) => revealable({ id, k: 'node', x: (x + .5) * T, y: (y + .5) * T, r: JAM_R.node, gone: gone('jams', id), humT: rand(0, 2.5), c: 2 }));
+  jamNades = []; phantom = null; jamK = 0; gprev = null;
+  player.phantomCD = 0; player.jammed = false;
+}
+
+// ---------- jamming ----------
+function jamSources() {
+  const out = [];
+  for (const j of jams) if (!j.gone && (j.k === 'node' || j.end > time)) out.push(j);
+  for (const e of enemies) if (e.type === 'jammer' && !e.dead) out.push({ x: e.x, y: e.y, r: JAM_R.carrier, carrier: e });
+  return out;
+}
+function jamAt(x, y) {
+  let k = 0;
+  for (const s of jamSources()) { const d = Math.hypot(s.x - x, s.y - y); if (d < s.r) k = Math.max(k, clamp((s.r - d) / 55, 0, 1)); }
+  return k;
+}
+function jamFizzle(what) {
+  const P = player;
+  SFX.jam(.35);
+  emitSound(P.x, P.y, { hear: 140, reveal: 0, col: 0, owner: 'player' });
+  sparks(P.x, P.y, rand(0, TAU), 8, 4, 260, PI);
+  if (realT - msg.t > 1.2) showMsg(`${what} JAMMED  ·  FIND THE TRANSMITTER`, 1);
+}
+function destroyNode(j, silent) {
+  if (j.gone) return;
+  j.gone = true;
+  stats.score += 400;
+  popups.push({ x: j.x, y: j.y - 26, text: 'JAMMER DOWN  +400', t: time, c: 0, size: 16, vy: -22, pop: true });
+  callout('SIGNAL RESTORED', 'JAMMER DESTROYED  +400', 0);
+  emitSound(j.x, j.y, { hear: silent ? 60 : 260, reveal: 620, col: 0, owner: 'player', str: 1, force: true });
+  ring(j.x, j.y, 6, 120, 4, .6, 3); ring(j.x, j.y, 6, 60, 3, .3, 2);
+  sparks(j.x, j.y, 0, 26, 4, 520, PI); smoke(j.x, j.y, 5, .8);
+  light(j.x, j.y, 260, 0, .5, 1);
+  shake = Math.max(shake, 6); hitstop = Math.max(hitstop, .05);
+  SFX.nodeDown(j.x, j.y);
+}
+function throwJam(e) {
+  const k = e.know;
+  jamNades.push({ x: e.x, y: e.y, x0: e.x, y0: e.y, x1: k.x, y1: k.y, t: 0, dur: .6, rot: 0 });
+  e.jamCD = rand(8, 10);
+  popups.push({ x: e.x, y: e.y - 30, text: 'JAM OUT', t: time, c: 1, size: 13, vy: -12 });
+  emitSound(e.x, e.y, { hear: 0, reveal: 110, col: 1, owner: 'enemy', str: .8, ind: true });
+  SFX.swish();
+}
+// the carrier: a hunter with a transmitter on his back. Throws jam charges at whatever he heard.
+function updJammer(e, dt, age) {
+  e.jamCD = (e.jamCD ?? rand(1, 3)) - dt;
+  if (e.jamCD > 0 || !e.know || age > 1.4 || (e.state !== 'hunt' && e.state !== 'search')) return;
+  const d = Math.hypot(e.know.x - e.x, e.know.y - e.y);
+  if (d > 90 && d < 440 && los(e.x, e.y, e.know.x, e.know.y)) throwJam(e);
+}
+
+// ---------- traps ----------
+function segDist(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1, l2 = dx * dx + dy * dy, t = l2 ? clamp(((px - x1) * dx + (py - y1) * dy) / l2, 0, 1) : 0;
+  return Math.hypot(px - (x1 + dx * t), py - (y1 + dy * t));
+}
+function segCross(ax, ay, bx, by, cx, cy, dx, dy) {
+  const d = (bx - ax) * (dy - cy) - (by - ay) * (dx - cx); if (Math.abs(d) < 1e-9) return false;
+  const u = ((cx - ax) * (dy - cy) - (cy - ay) * (dx - cx)) / d, v = ((cx - ax) * (by - ay) - (cy - ay) * (bx - ax)) / d;
+  return u >= 0 && u <= 1 && v >= 0 && v <= 1;
+}
+function glassAt(x, y) {
+  for (const t of traps) if (t.k === 'glass' && x > t.x0 && x < t.x0 + t.w && y > t.y0 && y < t.y0 + t.h) return t;
+  return null;
+}
+function glassCrunch(g, x, y, isPlayer, running) {
+  g.litS = Math.max(.9, flash(g.litS, g.litT)); g.litT = time;
+  if (isPlayer) {
+    emitSound(x, y, { hear: running ? 480 : 330, reveal: 250, col: 2, owner: 'player', str: .85, trail: true });
+    popups.push({ x: x + rand(-8, 8), y: y - 20, text: 'CRUNCH', t: time, c: 2, size: 12, vy: -12 });
+    if (!MS.said.glass) { MS.said.glass = 1; radio('MARCUS', 'Glass on the floor. They can hear every step on it — dash across.'); }
+  } else emitSound(x, y, { hear: 0, reveal: 240, col: 1, owner: 'enemy', str: .9, ind: true, trail: true });
+  sparks(x, y, rand(0, TAU), 5, 3, 160, PI);
+  SFX.crunch(x, y);
+}
+function tripWire(w) {
+  w.gone = true; w.litS = 1.2; w.litT = time;
+  emitSound(w.x, w.y, { hear: 1050, reveal: 680, col: 1, owner: 'env', str: 1, force: true, ind: true });
+  SFX.bell(w.x, w.y);
+  callout('TRIPWIRE', 'THE WHOLE HOUSE HEARD THAT', 1);
+  popups.push({ x: w.x, y: w.y - 24, text: 'RIIIING', t: time, c: 1, size: 18, vy: -18, pop: true });
+  sparks(w.x1, w.y1, 0, 8, 1, 260, PI); sparks(w.x2, w.y2, 0, 8, 1, 260, PI);
+  light(w.x, w.y, 200, 1, .4, 1); shake = Math.max(shake, 7); zoomPunch = Math.max(zoomPunch, .03);
+  if (!MS.said.wire) { MS.said.wire = 1; radio('MARCUS', 'Tripwire. Every one of them just heard where you are. Ping ahead — a knife cuts those.'); }
+}
+function armMine(m, delay) {
+  if (m.gone || m.armT >= 0) return;
+  m.armT = delay; m.litS = 1.2; m.litT = time;
+  SFX.arm(m.x, m.y);
+  emitSound(m.x, m.y, { hear: 0, reveal: 110, col: 2, owner: 'env', str: 1, force: true });
+  popups.push({ x: m.x, y: m.y - 24, text: 'CLICK', t: time, c: 2, size: 16, vy: -14, pop: true });
+}
+function mineBlast(m) {
+  if (m.gone) return;
+  m.gone = true; m.armT = -1;
+  emitSound(m.x, m.y, { hear: 820, reveal: 820, col: 2, owner: 'env', str: 1.15, force: true, ind: true });
+  SFX.boom(m.x, m.y);
+  const dp = Math.hypot(player.x - m.x, player.y - m.y);
+  shake = Math.max(shake, 20 * Math.max(.25, 1 - dp / 900)); zoomPunch = Math.max(zoomPunch, .05 * Math.max(.3, 1 - dp / 900));
+  pp({ k: 'fire', x: m.x, y: m.y, vx: 0, vy: 0, life: .4, max: .4, c: 2, r1: 95 });
+  ring(m.x, m.y, 8, 150, 3, .3, 4); ring(m.x, m.y, 8, 110, 2, .5, 2);
+  light(m.x, m.y, 380, 2, .5, 1.1); smoke(m.x, m.y, 9, 1.1);
+  for (let i = 0; i < 40; i++) { const a = rand(0, TAU), s = rand(120, 700); pp({ k: 'spark', x: m.x, y: m.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(.25, .7), max: .7, c: i % 3 ? 2 : 3, s: rand(1.2, 2.4), drag: 3 }); }
+  decals.push({ x: m.x, y: m.y, r: 34, k: 'scorch', rot: rand(0, TAU) });
+  for (const e of enemies) if (!e.dead && !e.hidden && Math.hypot(e.x - m.x, e.y - m.y) < 115 && los(m.x, m.y, e.x, e.y)) {
+    if (e.type === 'boss') damageEnemy(e, 6, 'blast', false); else { e.hp = 1; damageEnemy(e, 99, 'blast', false); }
+  }
+  if (dp < 100 && !player.dead && los(m.x, m.y, player.x, player.y)) { player.iframe = 0; damagePlayer(2, m.x, m.y); }
+  for (const b of barrels) if (!b.gone && Math.hypot(b.x - m.x, b.y - m.y) < 130) timers.push({ t: time + .14, fn: () => explode(b) });
+  for (const o of traps) if (o.k === 'mine' && !o.gone && o !== m && Math.hypot(o.x - m.x, o.y - m.y) < 130) armMine(o, .15);
+}
+function disarmBonus(x, y, label, pts) {
+  stats.score += pts;
+  popups.push({ x, y: y - 24, text: `${label}  +${pts}`, t: time, c: 0, size: 15, vy: -20, pop: true });
+  ring(x, y, 4, 50, 0, .35, 2); sparks(x, y, 0, 10, 0, 240, PI);
+  SFX.disarm();
+}
+// knife: cuts wires, disarms mines, smashes jammers. Returns true if it hit something.
+function knifeGadgets(P) {
+  const hx = P.x + Math.cos(P.a) * 26, hy = P.y + Math.sin(P.a) * 26;
+  let hit = false;
+  for (const t of traps) {
+    if (t.gone || t.k === 'glass') continue;
+    // generous reach: the hand OR the body close enough counts — you can't always see what you're cutting
+    if (t.k === 'wire' && Math.min(segDist(hx, hy, t.x1, t.y1, t.x2, t.y2), segDist(P.x, P.y, t.x1, t.y1, t.x2, t.y2) - 10) < 40) { t.gone = true; disarmBonus(hx, hy, 'WIRE CUT', 200); hit = true; }
+    if (t.k === 'mine' && t.armT < 0 && Math.min(Math.hypot(t.x - hx, t.y - hy), Math.hypot(t.x - P.x, t.y - P.y) - 12) < 48) {
+      t.gone = true; disarmBonus(t.x, t.y, 'DISARMED', 250); hit = true;
+      if (!MS.said.disarm) { MS.said.disarm = 1; callout('MINE DISARMED', 'SHOOT THEM NEAR ENEMIES INSTEAD', 0); }
+    }
+  }
+  for (const j of jams) if (!j.gone && j.k === 'node' && Math.min(Math.hypot(j.x - hx, j.y - hy), Math.hypot(j.x - P.x, j.y - P.y) - 12) < 50) { destroyNode(j, true); hit = true; }
+  return hit;
+}
+// bullets: detonate mines, wreck jammers
+function gadgetBulletHit(b) {
+  for (const t of traps) if (t.k === 'mine' && !t.gone && Math.hypot(t.x - b.x, t.y - b.y) < 18) { armMine(t, .06); return true; }
+  for (const j of jams) if (!j.gone && j.k === 'node' && Math.hypot(j.x - b.x, j.y - b.y) < 34) { if (b.o === 'p') destroyNode(j, false); return true; }
+  return false;
+}
+
+// ---------- PHANTOM: a projected echo of you that walks, breathes, and draws them in ----------
+function castPhantom() {
+  const P = player;
+  if (phantom) return shatterPhantom(true);
+  if (P.phantomCD > 0) { SFX.empty(); return; }
+  if (P.jammed) return jamFizzle('PHANTOM');
+  const mw = screenToWorld(mouse.x, mouse.y), a = Math.atan2(mw.y - P.y, mw.x - P.x);
+  let path = [];
+  if (passable(Math.floor(mw.x / T), Math.floor(mw.y / T)) && Math.hypot(mw.x - P.x, mw.y - P.y) < 900) path = findPath(P.x, P.y, mw.x, mw.y).slice(0, 18);
+  if (!path.length) {
+    const d = Math.max(30, Math.min(560, rayDist(P.x, P.y, Math.cos(a), Math.sin(a), 560) - 20));
+    path = [[P.x + Math.cos(a) * d, P.y + Math.sin(a) * d]];
+  }
+  phantom = { x: P.x, y: P.y, a, ma: a, ph: 0, mv: 0, path, pi: 0, t: PHANTOM_LIFE, t0: time, stepAcc: 0, beatT: .2, lookT: 0 };
+  P.phantomCD = PHANTOM_CD;
+  SFX.phantom();
+  ring(P.x, P.y, 8, 70, 0, .45, 2);
+  for (let i = 0; i < 14; i++) { const aa = rand(0, TAU); pp({ k: 'spark', x: P.x, y: P.y, vx: Math.cos(aa) * 180, vy: Math.sin(aa) * 180, life: .3, max: .3, c: 0, s: 1.2, drag: 4 }); }
+  if (!MS.said.phantom) { MS.said.phantom = 1; callout('PHANTOM', 'THEY CHASE IT · G AGAIN TO SHATTER IT', 0); }
+}
+function updPhantom(dt) {
+  const f = phantom; if (!f) return;
+  f.t -= dt;
+  if (f.t <= 0) return shatterPhantom(false);
+  if (f.pi < f.path.length) {
+    const [tx, ty] = f.path[f.pi], dx = tx - f.x, dy = ty - f.y, d = Math.hypot(dx, dy), step = 205 * dt;
+    if (d < step + 1) { f.x = tx; f.y = ty; f.pi++; }
+    else { f.x += dx / d * step; f.y += dy / d * step; }
+    const ma = Math.atan2(dy, dx); f.ma = turnTo(f.ma, ma, dt * 12); f.a = turnTo(f.a, ma, dt * 8);
+    f.mv = Math.min(1, f.mv + dt * 5); f.ph += step * PI / 54; f.stepAcc += step;
+    if (f.stepAcc > 54) {
+      f.stepAcc = 0;
+      emitSound(f.x, f.y, { hear: 330, reveal: 190, col: 0, owner: 'decoy', str: .6, trail: true, force: true });
+      SFX.step(f.x, f.y, .32, false);
+    }
+  } else {
+    f.mv = Math.max(0, f.mv - dt * 4);
+    f.lookT -= dt; if (f.lookT <= 0) { f.lookT = rand(.6, 1.4); f.look = f.a + rand(-1.4, 1.4); }
+    f.a = turnTo(f.a, f.look ?? f.a, dt * 4);
+    f.beatT -= dt;
+    if (f.beatT <= 0) {
+      f.beatT = .85;
+      emitSound(f.x, f.y, { hear: 380, reveal: 150, col: 0, owner: 'decoy', str: .55, force: true });
+      const s = spat(f.x, f.y, 1300); if (AU.ctx && !AU.muted) tone({ pan: s.pan, vol: .22 * s.vol + .02, dur: .15, f0: 70, f1: 46, echo: .5 });
+    }
+  }
+  for (const e of enemies) if (!e.dead && !e.hidden && e.state !== 'stun' && Math.hypot(e.x - f.x, e.y - f.y) < e.r + 20) return shatterPhantom(true);
+}
+function shatterPhantom(burst) {
+  const f = phantom; if (!f) return;
+  phantom = null;
+  if (!burst) { ring(f.x, f.y, 6, 50, 0, .4, 1.5); smoke(f.x, f.y, 3, .5); return; }
+  let n = 0;
+  for (const e of enemies) {
+    if (e.dead || e.hidden) continue;
+    const d = Math.hypot(e.x - f.x, e.y - f.y);
+    if (d > PHANTOM_R || !los(f.x, f.y, e.x, e.y)) continue;
+    n++;
+    e.markT = time + d / WAVE_SPEED; e.markEnd = e.markT + (e.type === 'boss' ? 3.2 : 4.5);
+    if (e.type === 'boss') { e.cd = Math.max(e.cd, 1.4); e.state = 'hunt'; e.flinch = .8; popups.push({ x: e.x, y: e.y - 48, text: 'DAZED', t: time, c: 0, size: 18, vy: -14, pop: true }); continue; }
+    e.state = 'stun'; e.stunT = 2.4; e.pstun = true; e.path = null;
+    e.litS = 1; e.litT = time; e.gx = e.x; e.gy = e.y; e.ga = e.a; e.gpose = { stun: true };
+    popups.push({ x: e.x, y: e.y - 26, text: 'FROZEN', t: time, c: 0, size: 13, vy: -12 });
+  }
+  emitSound(f.x, f.y, { hear: 0, reveal: 520, col: 0, owner: 'env', str: 1.05, force: true });
+  ring(f.x, f.y, 10, PHANTOM_R, 0, .45, 4); ring(f.x, f.y, 6, PHANTOM_R * .6, 3, .3, 2);
+  for (let i = 0; i < 34; i++) { const a = rand(0, TAU), s = rand(160, 620); pp({ k: 'spark', x: f.x, y: f.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(.2, .5), max: .5, c: i % 4 ? 0 : 3, s: 1.5, drag: 5 }); }
+  light(f.x, f.y, 300, 0, .45, 1.2);
+  shake = Math.max(shake, 7); zoomPunch = Math.max(zoomPunch, .035);
+  SFX.shatter(f.x, f.y);
+  if (n) {
+    stats.score += n * 150;
+    callout(n >= 2 ? `PHANTOM x${n}` : 'PHANTOM', `FROZEN · MARKED · STRIKE THEM  +${n * 150}`, 0, n >= 2);
+    slowT = Math.max(slowT, .25 + n * .08);
+  }
+}
+
+// ---------- per-frame ----------
+function updGadgets(dt) {
+  const P = player;
+  P.phantomCD = Math.max(0, (P.phantomCD || 0) - dt);
+  updPhantom(dt);
+  // tripwires: did the player's body cross one this frame?
+  if (gprev && !P.dead && !P.strike) for (const w of traps) {
+    if (w.k !== 'wire' || w.gone) continue;
+    if (segCross(gprev.x, gprev.y, P.x, P.y, w.x1, w.y1, w.x2, w.y2) || segDist(P.x, P.y, w.x1, w.y1, w.x2, w.y2) < 5) tripWire(w);
+  }
+  gprev = { x: P.x, y: P.y };
+  // mines: beep faster the closer you are, click, then blow
+  for (const m of traps) {
+    if (m.k !== 'mine' || m.gone) continue;
+    const dp = Math.hypot(P.x - m.x, P.y - m.y);
+    if (m.armT >= 0) {
+      m.armT -= dt;
+      if (Math.floor(m.armT * 20) !== Math.floor((m.armT + dt) * 20)) { m.litS = 1.2; m.litT = time; }
+      if (m.armT <= 0) mineBlast(m);
+      continue;
+    }
+    m.beepT -= dt;
+    if (m.beepT <= 0) {
+      m.beepT = lerp(.28, 2.2, clamp((dp - 50) / 420, 0, 1)); m.beepAt = time;
+      if (dp < 700) { SFX.beep(m.x, m.y); emitSound(m.x, m.y, { hear: 0, reveal: 48, col: 1, owner: 'env', str: .9 }); }
+      if (dp < 260 && !MS.said.mine) { MS.said.mine = 1; radio('MARCUS', 'That beeping is a mine. Ping to find it — cut it with the knife, or shoot it when they\'re standing on it.'); }
+    }
+    if (!P.dead && dp < 32) { armMine(m, .5); continue; }
+    for (const e of enemies) if (!e.dead && !e.hidden && e.type !== 'boss' && (e.state === 'hunt' || e.state === 'search') && Math.hypot(e.x - m.x, e.y - m.y) < 28) { armMine(m, .35); break; }
+  }
+  // jammer nodes hum so you can hunt them down
+  for (const j of jams) {
+    if (j.gone || j.k !== 'node') continue;
+    j.humT -= dt;
+    if (j.humT <= 0) { j.humT = 2.4; const d = Math.hypot(P.x - j.x, P.y - j.y); if (d < 900) { emitSound(j.x, j.y, { hear: 0, reveal: 95, col: 2, owner: 'env', str: .8 }); SFX.nodeHum(j.x, j.y); } }
+  }
+  for (let i = jams.length - 1; i >= 0; i--) if (jams[i].k === 'field' && jams[i].end < time) jams.splice(i, 1);
+  // jam charges in flight
+  for (let i = jamNades.length - 1; i >= 0; i--) {
+    const n = jamNades[i]; n.t += dt; n.rot += dt * 14;
+    const k = Math.min(1, n.t / n.dur); n.x = lerp(n.x0, n.x1, k); n.y = lerp(n.y0, n.y1, k);
+    if (k >= 1) {
+      jamNades.splice(i, 1);
+      jams.push({ k: 'field', x: n.x, y: n.y, r: JAM_R.field, end: time + 6.5, t0: time });
+      emitSound(n.x, n.y, { hear: 0, reveal: 220, col: 1, owner: 'enemy', str: .9, ind: true });
+      ring(n.x, n.y, 6, JAM_R.field, 4, .6, 3); sparks(n.x, n.y, 0, 14, 4, 320, PI);
+      SFX.jam(.5);
+    }
+  }
+  // are we jammed?
+  jamK = P.dead ? 0 : jamAt(P.x, P.y);
+  const was = P.jammed; P.jammed = jamK > .5;
+  if (P.jammed && !was) {
+    SFX.jam(.5);
+    for (const e of enemies) if (e.markEnd > time) e.markEnd = time; // marks die in the static
+    if (!MS.said.jam) { MS.said.jam = 1; radio('MARCUS', "They're jamming you — no sonar, no strike in there. Find the transmitter and break it."); }
+  }
+  if (jamK > 0 && AU.ctx && !AU.muted) { jamSfxT -= dt; if (jamSfxT <= 0) { jamSfxT = .32; noise({ vol: .035 * jamK, dur: .36, f0: rand(1800, 5200), type: 'bandpass', q: 1.2, echo: 0 }); } }
+}
+
+// ---------- drawing ----------
+function drawTraps() {
+  for (const t of traps) {
+    if (t.gone || t.x < vx0 - 120 || t.x > vx1 + 120 || t.y < vy0 - 120 || t.y > vy1 + 120) continue;
+    if (t.k === 'glass') {
+      const a = Math.min(1, Math.max(alphaOf(t) * 1.1, glintAlpha(t, 0) * .6)); if (a < .03) continue;
+      for (const s of t.shards) {
+        const tw = .6 + .4 * Math.sin(realT * 3 + s.f * 20);
+        ctx.strokeStyle = rgba(CARR[3], a * (.35 + .5 * s.f) * tw); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(s.x + Math.cos(s.a) * s.r, s.y + Math.sin(s.a) * s.r);
+        ctx.lineTo(s.x + Math.cos(s.a + 2.3) * s.r * .6, s.y + Math.sin(s.a + 2.3) * s.r * .6);
+        ctx.lineTo(s.x + Math.cos(s.a + 3.9) * s.r * .8, s.y + Math.sin(s.a + 3.9) * s.r * .8); ctx.closePath(); ctx.stroke();
+      }
+      ctx.strokeStyle = rgba(CARR[2], a * .25); ctx.setLineDash([3, 7]); ctx.strokeRect(t.x0 + 2, t.y0 + 2, t.w - 4, t.h - 4); ctx.setLineDash([]);
+      continue;
+    }
+    if (t.k === 'wire') {
+      const near = Math.max(0, 1 - segDist(player.x, player.y, t.x1, t.y1, t.x2, t.y2) / 80) * .75;
+      const a = Math.min(1, Math.max(alphaOf(t) * 1.2, near)); if (a < .03) continue;
+      const h = .02, [ax, ay] = [ex(t.x1, h), ey(t.y1, h)], [bx, by] = [ex(t.x2, h), ey(t.y2, h)];
+      ctx.strokeStyle = rgba(CARR[1], a * .9); ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      ctx.strokeStyle = rgba(CARR[1], a * .25); ctx.lineWidth = 4; ctx.stroke();
+      for (const [px, py, qx, qy] of [[t.x1, t.y1, ax, ay], [t.x2, t.y2, bx, by]]) { ctx.strokeStyle = rgba(CARR[1], a); ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(qx, qy, 3.5, 0, TAU); ctx.moveTo(px, py); ctx.lineTo(qx, qy); ctx.stroke(); }
+      // bell
+      const mx = (ax + bx) / 2, my = (ay + by) / 2;
+      ctx.fillStyle = rgba(CARR[2], a * .3); ctx.strokeStyle = rgba(CARR[2], a); ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(mx - 4, my + 3); ctx.quadraticCurveTo(mx - 4, my - 6, mx, my - 6); ctx.quadraticCurveTo(mx + 4, my - 6, mx + 4, my + 3); ctx.closePath(); ctx.fill(); ctx.stroke();
+      continue;
+    }
+    // mine
+    const beep = Math.max(0, 1 - (time - t.beepAt) / .25), armed = t.armT >= 0;
+    const a = Math.min(1, Math.max(alphaOf(t), glintAlpha(t, 0), beep * .55, armed ? 1 : 0)); if (a < .03) continue;
+    ctx.strokeStyle = rgba(CARR[1], a); ctx.lineWidth = 1.5; ctx.fillStyle = rgba(CARR[1], a * .12);
+    ctx.beginPath(); ctx.arc(t.x, t.y, 9, 0, TAU); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); for (let i = 0; i < 4; i++) { const aa = i * PI / 2 + PI / 4; ctx.moveTo(t.x + Math.cos(aa) * 9, t.y + Math.sin(aa) * 9); ctx.lineTo(t.x + Math.cos(aa) * 14, t.y + Math.sin(aa) * 14); } ctx.stroke();
+    const on = armed ? Math.floor(realT * 24) % 2 === 0 : beep > .3;
+    ctx.fillStyle = on ? 'rgba(255,235,235,1)' : rgba(CARR[1], a * .6); ctx.beginPath(); ctx.arc(t.x, t.y, on ? 3.2 : 2.2, 0, TAU); ctx.fill();
+    if (armed) { ctx.strokeStyle = rgba(CARR[2], .9); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(t.x, t.y, 100, 0, TAU); ctx.stroke(); ctx.strokeStyle = rgba(CARR[1], .5); ctx.beginPath(); ctx.arc(t.x, t.y, 14 + (1 - t.armT / .5) * 80, 0, TAU); ctx.stroke(); }
+  }
+}
+function jamRing(x, y, r, a, rot) {
+  ctx.save(); ctx.translate(x, y);
+  const g = ctx.createRadialGradient(0, 0, r * .55, 0, 0, r);
+  g.addColorStop(0, rgba(VIO, 0)); g.addColorStop(1, rgba(VIO, .09 * a));
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+  ctx.rotate(rot); ctx.setLineDash([10, 8]);
+  ctx.strokeStyle = rgba(VIO, .55 * a * (.75 + .25 * Math.random())); ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();
+  ctx.setLineDash([2, 14]); ctx.lineWidth = 3; ctx.strokeStyle = rgba(VIO, .3 * a); ctx.beginPath(); ctx.arc(0, 0, r - 7, 0, TAU); ctx.stroke();
+  ctx.setLineDash([]); ctx.restore();
+}
+function drawJams() {
+  const P = player;
+  for (const j of jams) {
+    if (j.gone) continue;
+    const d = Math.hypot(P.x - j.x, P.y - j.y);
+    if (j.x < vx0 - j.r || j.x > vx1 + j.r || j.y < vy0 - j.r || j.y > vy1 + j.r) continue;
+    const fa = j.k === 'field' ? Math.min(1, (j.end - time) / .6, (time - j.t0) / .2) : 1;
+    const prox = clamp(1 - (d - j.r) / 380, 0, 1) * fa;
+    if (prox > .02) jamRing(j.x, j.y, j.r, prox, realT * (j.k === 'field' ? .9 : .35));
+    if (j.k === 'field') { ctx.fillStyle = rgba(VIO, .8 * fa); ctx.beginPath(); ctx.arc(j.x, j.y, 3 + Math.random() * 2, 0, TAU); ctx.fill(); continue; }
+    const a = Math.min(1, Math.max(alphaOf(j) * 1.2, glintAlpha(j, 0), P.jammed ? .4 + .2 * Math.sin(realT * 6) : 0)); if (a < .03) continue;
+    const tx = ex(j.x, .05), ty = ey(j.y, .05);
+    ctx.strokeStyle = rgba(VIO, a); ctx.lineWidth = 1.6; ctx.fillStyle = rgba(VIO, a * .12);
+    ctx.beginPath(); ctx.rect(j.x - 10, j.y - 10, 20, 20); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(j.x, j.y); ctx.lineTo(tx, ty); ctx.stroke();
+    ctx.beginPath(); ctx.arc(tx, ty, 3, 0, TAU); ctx.stroke();
+    for (let i = 0; i < 3; i++) { const r = ((realT * 1.3 + i / 3) % 1) * 30 + 6; ctx.strokeStyle = rgba(VIO, a * (1 - r / 36)); ctx.beginPath(); ctx.arc(tx, ty, r, -2.3, -.8); ctx.moveTo(tx + Math.cos(.8) * r, ty + Math.sin(.8) * r); ctx.arc(tx, ty, r, .8, 2.3); ctx.stroke(); }
+  }
+  for (const e of enemies) {
+    if (e.type !== 'jammer' || e.dead) continue;
+    const fa = flash(e.litS, e.litT); if (fa > .05) jamRing(e.gx, e.gy, JAM_R.carrier, fa * .8, realT * .6);
+  }
+  for (const n of jamNades) {
+    const k = n.t / n.dur, h = Math.sin(k * PI) * 26;
+    ctx.fillStyle = rgba(VIO, .25); ctx.beginPath(); ctx.ellipse(n.x, n.y, 4, 2.5, 0, 0, TAU); ctx.fill();
+    ctx.save(); ctx.translate(n.x, n.y - h); ctx.rotate(n.rot); ctx.strokeStyle = rgba(VIO, 1); ctx.lineWidth = 1.6; ctx.strokeRect(-4, -4, 8, 8); ctx.restore();
+  }
+}
+function drawPhantom() {
+  const f = phantom; if (!f) return;
+  const life = Math.min(1, f.t / .7, (time - f.t0) / .25);
+  const fl = .7 + .2 * Math.sin(realT * 23) + .1 * Math.sin(realT * 7.3);
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  ctx.strokeStyle = rgba(CARR[0], .3 * life); ctx.lineWidth = 1.2; ctx.setLineDash([4, 7]); ctx.lineDashOffset = -realT * 30;
+  ctx.beginPath(); ctx.arc(f.x, f.y, 24, 0, TAU); ctx.stroke();
+  ctx.strokeStyle = rgba(CARR[0], .1 * life); ctx.beginPath(); ctx.arc(f.x, f.y, PHANTOM_R, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+  const tl = f.t / PHANTOM_LIFE; ctx.strokeStyle = rgba(CARR[0], .6 * life); ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(f.x, f.y, 30, -PI / 2, -PI / 2 + TAU * tl); ctx.stroke();
+  ctx.restore();
+  const o = { kind: 'player', weapon: player.weapon, a: f.a, ma: f.ma, ph: f.ph, mv: f.mv, run: true, alpha: life * fl * .75, additive: true };
+  drawCharacter(f.x + (Math.random() < .12 ? rand(-5, 5) : 0), f.y, o);
+  if (Math.random() < .35) drawCharacter(f.x + rand(-7, 7), f.y + rand(-3, 3), { ...o, alpha: life * .22 });
+}
+function drawGadgetHUD(S, pad) {
+  if (jamK > .02 && state === 'playing') {
+    ctx.save();
+    const n = Math.floor(6 + 26 * jamK);
+    for (let i = 0; i < n; i++) { ctx.fillStyle = rgba(Math.random() < .5 ? VIO : CARR[3], rand(.02, .09) * jamK); ctx.fillRect(0, Math.random() * H, W, rand(1, 3.5) * S); }
+    if (grain) {
+      if (!jamPat) jamPat = ctx.createPattern(grain, 'repeat');
+      ctx.globalAlpha = .06 * jamK; ctx.globalCompositeOperation = 'lighter';
+      ctx.translate(-Math.random() * 256, -Math.random() * 256); ctx.fillStyle = jamPat; ctx.fillRect(0, 0, W + 256, H + 256);
+    }
+    ctx.restore();
+    const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * .3, W / 2, H / 2, Math.max(W, H) * .7);
+    g.addColorStop(0, rgba(VIO, 0)); g.addColorStop(1, rgba(VIO, .22 * jamK)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    if (player.jammed) {
+      const y = H - pad - 150 * S, jit = Math.random() < .2 ? rand(-6, 6) * S : 0;
+      glitchText('SIGNAL JAMMED', W / 2 + jit, y, 18 * S, VIO, .75 + .25 * Math.sin(realT * 14), 'center', 700, `${7 * S}px`, 2);
+      text('NO SONAR  ·  NO STRIKE  ·  NO PHANTOM', W / 2, y + 20 * S, 10 * S, CARR[3], .6, 'center', 600, `${3 * S}px`);
+    }
+  }
+}
+
+// =====================================================================
+//  VOICE — pre-rendered neural voice lines (assets/voice/vo.js), run through the game's audio graph
+// =====================================================================
+const VOX = { buf: {}, pend: {}, ch: {}, shaper: null };
+const VSTYLE = {
+  ECHO: { echo: .16, lp: 9000, low: 4, gain: 1.25 },
+  MARCUS: { radio: true, echo: .1, gain: 1.45 },
+  CONDUCTOR: { echo: .55, lp: 7500, low: 6, gain: 1.35, rate: .97 },
+  LENA: { echo: .5, lp: 6500, gain: 1.15 },
+  ENEMY: { spatial: true, echo: .32, lp: 6000, gain: 1.6 },
+};
+function voEntry(key) { return window.VO_LINES && window.VO_LINES[key]; }
+function voDecode(key) {
+  if (VOX.buf[key]) return VOX.buf[key];
+  const ent = voEntry(key); if (!ent || !AU.ctx || VOX.pend[key]) return null;
+  VOX.pend[key] = 1;
+  try {
+    const bin = atob(ent.b), u = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    AU.ctx.decodeAudioData(u.buffer).then(b => { VOX.buf[key] = b; }, () => {});
+  } catch (e) {}
+  return null;
+}
+function voPreload() { if (!window.VO_LINES || !AU.ctx || VOX.pre) return; VOX.pre = true; for (const k in window.VO_LINES) voDecode(k); }
+function voStop(ch) { const c = VOX.ch[ch]; if (c) { try { c.stop(); } catch (e) {} VOX.ch[ch] = null; } }
+function voStopAll() { for (const k in VOX.ch) voStop(k); }
+// plays a line; returns its length in seconds (0 when there's no recording — the subtitle still shows)
+function speak(who, text, o) {
+  o = o || {};
+  const key = (o.vox || who) + '|' + text, ent = voEntry(key);
+  if (!ent) return 0;
+  if (!AU.ctx || AU.muted) return ent.d;
+  const b = voDecode(key); if (!b) return ent.d;
+  const X = AU.ctx, st = VSTYLE[o.style || who] || VSTYLE.ENEMY, t = X.currentTime + (o.delay || 0);
+  const src = X.createBufferSource(); src.buffer = b; src.playbackRate.value = st.rate || 1;
+  let node = src;
+  const add = n => { node.connect(n); node = n; };
+  const bq = (type, f, q, gain) => { const n = X.createBiquadFilter(); n.type = type; n.frequency.value = f; if (q) n.Q.value = q; if (gain) n.gain.value = gain; add(n); };
+  if (st.radio) {
+    bq('highpass', 380, .7); bq('lowpass', 3300, .7); bq('peaking', 1700, 1.2, 6);
+    if (!VOX.shaper) { const c = new Float32Array(512); for (let i = 0; i < 512; i++) { const x = i / 256 - 1; c[i] = Math.tanh(x * 2.2); } VOX.shaper = c; }
+    const w = X.createWaveShaper(); w.curve = VOX.shaper; add(w);
+  } else {
+    if (st.lp) bq('lowpass', st.lp, .6);
+    if (st.low) bq('lowshelf', 200, 0, st.low);
+  }
+  let vol = (o.vol ?? 1) * (st.gain || 1), pan = 0;
+  if (st.spatial) { const s = spat(o.x, o.y, o.range || 1500); vol *= .12 + .88 * s.vol; pan = s.pan; }
+  if (player && player.deafT > 0) vol *= .3;
+  const g = X.createGain(); g.gain.value = vol; add(g);
+  node.connect(outNode(pan, 1, st.echo ?? .2));
+  src.start(t);
+  const ch = o.ch || who;
+  voStop(ch); VOX.ch[ch] = src; src.onended = () => { if (VOX.ch[ch] === src) VOX.ch[ch] = null; };
+  const dur = b.duration / (st.rate || 1);
+  if (st.radio) { noise({ vol: .08, dur: .12, f0: 2600, type: 'bandpass', q: 2, echo: 0, delay: dur + (o.delay || 0) }); }
+  return dur;
+}
+window.echoSpeak = speak; window.echoVoiceStop = voStopAll; window.echoVoicePreload = () => { initAudio(); voPreload(); };
+
+// =====================================================================
+//  SQUAD AI — they work out that you're blind, then hunt you as a team
+// =====================================================================
+const BARKS = /*json*/{
+  "alert": ["There!", "I heard something!", "Over here!", "Contact!"],
+  "search": ["Where'd he go?", "Quiet. Listen.", "Spread out.", "I lost him."],
+  "down": ["Man down!", "He's picking us off!", "We lost one!"],
+  "ping": ["That ping! He's right there!", "He's clicking. Follow the click!"],
+  "blind": ["He's blind! He can't see us, he's hunting by sound!"],
+  "quiet": ["Go quiet. Don't give him a sound."],
+  "surround": ["Surround him. Nobody makes a sound.", "Circle him. Wait for my call."],
+  "pincer": ["Split up! Take him from both sides!", "You go left, I go right."],
+  "flank": ["Pin him down! I'm going around!", "Keep him busy. Flank him!"],
+  "bait": ["I'll make noise. You take him from behind."],
+  "baitNoise": ["Over here, blind man!", "Come on! Follow my voice!"],
+  "rush": ["Now! Everyone, now!", "Take him!", "Go, go, go!"],
+  "ringer": ["Ringer out! Blow his ears!", "Deafen him!"],
+  "spoof": ["Clickers out. Let him chase ghosts."]
+}/*end*/;
+const SQ_CALL = {
+  surround: ["THEY'RE CIRCLING YOU", 'BREAK OUT BEFORE THEY CLOSE'],
+  pincer: ['PINCER', 'THEY SPLIT TO BOTH SIDES'],
+  flank: ['FLANKERS', 'GUNS PIN YOU · BLADES GO AROUND'],
+  bait: ["IT'S A TRAP", 'THE LOUD ONE IS BAIT · LISTEN BEHIND YOU'],
+};
+function eHash(e) { let h = 0; for (const c of String(e.id)) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); }
+function say(e, cat, force) {
+  if (!e || e.dead || e.hidden) return 0;
+  if (!force && (time - (e.sayT ?? -9) < 4 || time - (MS.sayT ?? -9) < 1.1)) return 0;
+  const L = BARKS[cat]; if (!L) return 0;
+  const text = L[(Math.random() * L.length) | 0];
+  e.sayT = time; MS.sayT = time;
+  e.vox = e.vox || 'E' + (1 + eHash(e) % 3);
+  popups.push({ x: e.x, y: e.y - 40, text: text.toUpperCase(), t: time, c: 1, size: 11, vy: -8 });
+  // talking gives them away
+  emitSound(e.x, e.y, { hear: 0, reveal: 115, col: 1, owner: 'enemy', str: .7, ind: Math.hypot(e.x - player.x, e.y - player.y) > 360 });
+  return speak(e.vox, text, { style: 'ENEMY', x: e.x, y: e.y, ch: 'e' + e.id }) || .9;
+}
+function initSquad(cp) {
+  MS.blind = !!(cp && cp.blind); MS.intel = MS.blind ? 1 : 0;
+  MS.sq = null; MS.sqCD = 4; MS.toolCD = 6; MS.ringers = []; MS.fakes = []; MS.sayT = -9;
+  if (player) { player.deafT = 0; player.deafMax = 1; }
+  if (AU.master) AU.master.gain.value = AU.muted ? 0 : .85;
+}
+function hunters(maxD) {
+  const P = player;
+  return enemies.filter(e => !e.dead && !e.hidden && e.type !== 'boss' && e.state === 'hunt' && Math.hypot(e.x - P.x, e.y - P.y) < maxD);
+}
+function learn(amt, who) {
+  if (MS.blind) return;
+  MS.intel = Math.min(1, MS.intel + amt);
+  if (MS.intel >= 1) blindReveal(who);
+}
+function blindReveal(sp) {
+  if (MS.blind) return;
+  MS.blind = true; MS.intel = 1;
+  sp = sp && !sp.dead ? sp : hunters(1200).sort((a, b) => Math.hypot(a.x - player.x, a.y - player.y) - Math.hypot(b.x - player.x, b.y - player.y))[0];
+  const d = sp ? say(sp, 'blind', true) : 0;
+  const o = hunters(1100).find(x => x !== sp);
+  if (o) timers.push({ t: time + Math.max(1.6, d + .3), fn: () => say(o, 'quiet', true) });
+  callout("THEY KNOW YOU'RE BLIND", 'THEY GO QUIET · THEY HUNT AS ONE', 1, true);
+  slowT = Math.max(slowT, .6); zoomPunch = Math.max(zoomPunch, .04);
+  radio('MARCUS', "They've figured it out, Elias. They know you're blind. They'll go quiet and come at you together. Don't let them box you in.");
+  MS.toolCD = 5; MS.sqCD = Math.min(MS.sqCD, 2.5);
+}
+// called by sonar(): every ping teaches them something — and once they know, they dodge it
+function squadOnPing() {
+  const P = player; let n = 0, first = null, fd = 1e9;
+  for (const e of enemies) {
+    if (e.dead || e.hidden || e.type === 'boss') continue;
+    const d = Math.hypot(e.x - P.x, e.y - P.y); if (d > 720 * ETYPE[e.type].ear) continue;
+    if (e.state !== 'hunt' && e.state !== 'search') continue;
+    n++; if (d < fd) { fd = d; first = e; }
+    if (MS.blind && d < 640 && !e.order && Math.random() < .55) { e.sideT = .45; e.sideA = Math.atan2(e.y - P.y, e.x - P.x) + (Math.random() < .5 ? 1 : -1) * PI / 2; }
+  }
+  if (n) { learn(Math.min(.45, .16 * n), first); if (!MS.blind && MS.intel > .4 && first) say(first, 'ping'); }
+  // the ping exposes their fake footsteps
+  for (const f of MS.fakes) { const d = Math.hypot(f.x - P.x, f.y - P.y); if (d < (P.deafT > 0 ? 300 : 1000) && !f.exposed) f.exposed = time + d / WAVE_SPEED; }
+}
+function squadOnKill(e) {
+  const o = hunters(700).find(x => x !== e && Math.hypot(x.x - e.x, x.y - e.y) < 520);
+  if (o && Math.random() < .6) timers.push({ t: time + .35, fn: () => say(o, 'down') });
+  if (MS.sq) MS.sq.members = MS.sq.members.filter(x => x !== e);
+}
+function squadOnSearch(e) { if (Math.random() < .35) say(e, 'search'); }
+
+// ---------- plans ----------
+function slotNear(cx, cy, a, r) {
+  for (const k of [1, .75, .5]) for (const da of [0, .35, -.35, .7, -.7]) {
+    const x = cx + Math.cos(a + da) * r * k, y = cy + Math.sin(a + da) * r * k;
+    if (passable(Math.floor(x / T), Math.floor(y / T)) && los(cx, cy, x, y)) return { x, y };
+  }
+  return null;
+}
+function formPlan() {
+  const P = player;
+  const mem = hunters(800).filter(e => e.know && time - e.know.t < 3.5 && e.state !== 'stun');
+  if (mem.length < 2) { MS.sqCD = 1; return; }
+  const k = mem.reduce((a, b) => b.know.t > a.know.t ? b : a).know, cx = k.x, cy = k.y;
+  const guns = mem.filter(e => e.type === 'gunner' || e.type === 'heavy'), blades = mem.filter(e => !guns.includes(e));
+  if (!blades.length) { MS.sqCD = 2; return; }
+  let type = 'pincer';
+  if (MS.blind) type = guns.length ? 'flank' : blades.length >= 3 && Math.random() < .5 ? 'bait' : 'surround';
+  const mx = mem.reduce((s, e) => s + e.x, 0) / mem.length, my = mem.reduce((s, e) => s + e.y, 0) / mem.length;
+  const base = Math.atan2(my - cy, mx - cx);
+  const S = MS.sq = { type, members: [], cx, cy, t0: time, go: false, kt: k.t, bait: null, baitT: time + .8 };
+  let movers = blades.slice();
+  if (type === 'bait') {
+    movers.sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
+    const b = movers.shift(), sl = slotNear(cx, cy, base, 250);
+    if (sl) { b.order = { ...sl, end: time + 7, bait: true }; S.bait = b; }
+  }
+  const n = movers.length;
+  const angOf = e => angDiff(base, Math.atan2(e.y - cy, e.x - cx));
+  movers.sort((a, b) => angOf(a) - angOf(b));
+  movers.forEach((e, i) => {
+    let a, r = 125;
+    if (type === 'surround') a = base + (i - (n - 1) / 2) * (TAU / Math.max(n, 2));
+    else if (type === 'bait') { a = base + PI + (n > 1 ? (i / (n - 1) - .5) * 1.2 : 0); r = 110; }
+    else if (type === 'flank') a = base + (i % 2 ? 1 : -1) * 1.75;
+    else { if (i > 1) return; a = base + (i ? 1 : -1) * 1.3; r = 140; }
+    const sl = slotNear(cx, cy, a, r); if (!sl) return;
+    e.order = { ...sl, end: time + 7, arrived: false }; e.path = null;
+    S.members.push(e);
+  });
+  if (!S.members.length && !S.bait) { MS.sq = null; MS.sqCD = 2; return; }
+  const leader = S.bait || S.members[0];
+  say(leader, type, true);
+  const c = SQ_CALL[type]; callout(c[0], c[1], 1);
+  if (!MS.said['plan_' + type] && type !== 'pincer') {
+    MS.said['plan_' + type] = 1;
+    const lines = {
+      surround: "They're spreading out around you, quiet as ghosts. When they close the circle, they all come at once.",
+      flank: "The gunmen are keeping you busy so the others can get behind you.",
+      bait: "The loud one is bait, Elias. Listen behind you.",
+    };
+    radio('MARCUS', lines[type]);
+  }
+}
+function followOrder(e, ty, dt) {
+  const o = e.order;
+  if (!o.arrived) { const r = navTo(e, o.x, o.y, ty.run * (o.bait ? .9 : .78), dt); if (r === true || r === 'fail') o.arrived = true; }
+  else { const k = e.know || player; e.a = turnTo(e.a, Math.atan2(k.y - e.y, k.x - e.x), dt * 5); }
+}
+function endPlan() {
+  const S = MS.sq; if (!S) return;
+  for (const e of S.members) e.order = null;
+  if (S.bait) S.bait.order = null;
+  MS.sq = null; MS.sqCD = rand(6, 9);
+}
+function updPlan() {
+  const S = MS.sq; if (!S) return;
+  const P = player;
+  const team = S.members.concat(S.bait ? [S.bait] : []).filter(e => !e.dead && e.state !== 'stun');
+  if (!team.length) return endPlan();
+  if (S.go) { if (time - S.goT > 2.6) endPlan(); return; }
+  // they re-centre on anything newer they hear (a ping, a shot, a step)
+  const fresh = team.map(e => e.know).filter(Boolean).reduce((a, b) => (!a || b.t > a.t) ? b : a, null);
+  if (fresh && fresh.t > S.kt + .5 && Math.hypot(fresh.x - S.cx, fresh.y - S.cy) > 90) {
+    const dx = fresh.x - S.cx, dy = fresh.y - S.cy; S.kt = fresh.t; S.cx = fresh.x; S.cy = fresh.y;
+    for (const e of team) if (e.order) {
+      const nx = e.order.x + dx, ny = e.order.y + dy;
+      if (passable(Math.floor(nx / T), Math.floor(ny / T))) { e.order.x = nx; e.order.y = ny; e.order.arrived = false; }
+    }
+  }
+  if (S.bait && !S.bait.dead && S.bait.order && time > S.baitT) {
+    S.baitT = time + 1.25;
+    const b = S.bait;
+    emitSound(b.x, b.y, { hear: 0, reveal: 190, col: 1, owner: 'enemy', str: .9, ind: true });
+    SFX.door(b.x, b.y); ring(b.x, b.y, 6, 50, 1, .35, 2);
+    if (Math.random() < .5) say(b, 'baitNoise', true);
+  }
+  const ready = S.members.every(e => e.dead || !e.order || e.order.arrived);
+  if ((ready && time - S.t0 > 1.2) || time - S.t0 > 5.5) {
+    S.go = true; S.goT = time;
+    const near = Math.hypot(P.x - S.cx, P.y - S.cy) < 260;
+    say(team[(Math.random() * team.length) | 0], 'rush', true);
+    for (const e of team) {
+      e.order = null; e.rushT = time + 2.4; e.rushTrack = near; e.cd = Math.min(e.cd, .1); e.path = null; e.state = 'hunt';
+      e.know = near ? { x: P.x, y: P.y, t: time } : { x: S.cx, y: S.cy, t: time };
+      indicators.push({ x: e.x, y: e.y, t: time, c: 1 });
+    }
+    if (near) { callout('INCOMING', 'DASH · STRIKE · BREAK THE CIRCLE', 1, true); shake = Math.max(shake, 5); }
+    else callout('THEY CLOSED ON NOTHING', 'YOU WERE ALREADY GONE  +200', 0), stats.score += 200;
+  }
+}
+
+// ---------- their tools: ringers (deafen) and clickers (fake footsteps) ----------
+function addFake(x, y, kind, life, tgt) {
+  MS.fakes.push({ x, y, kind, a: rand(-PI, PI), end: time + life, stepT: rand(.1, .4), walk: 0, litS: 0, litT: -99, gx: x, gy: y, tgt, exposed: 0 });
+}
+function useTool() {
+  const P = player;
+  const thrower = hunters(900).find(e => {
+    if (!e.know || time - e.know.t > 2 || e.state !== 'hunt') return false;
+    const d = Math.hypot(e.know.x - e.x, e.know.y - e.y); return d > 140 && d < 470 && los(e.x, e.y, e.know.x, e.know.y);
+  });
+  if (!thrower) { MS.toolCD = 1; return; }
+  MS.toolCD = rand(8, 12);
+  const k = thrower.know;
+  if (MS.fakes.length >= 2 || Math.random() < .55) {
+    say(thrower, 'ringer', true);
+    MS.ringers.push({ x: thrower.x, y: thrower.y, x0: thrower.x, y0: thrower.y, x1: k.x + rand(-30, 30), y1: k.y + rand(-30, 30), t: 0, dur: .6, fuse: .5, rot: 0, landed: false });
+  } else {
+    say(thrower, 'spoof', true);
+    for (let i = 0; i < 2; i++) {
+      const sl = slotNear(k.x, k.y, rand(0, TAU), rand(190, 300));
+      if (sl) addFake(sl.x, sl.y, Math.random() < .5 ? 'hunter' : 'gunner', 8, { x: k.x, y: k.y });
+    }
+    if (!MS.said.spoof) { MS.said.spoof = 1; radio('MARCUS', "They're throwing clickers. Fake footsteps. Not everything you hear is real. Ping, and the fakes glitch out."); }
+  }
+}
+function deafen(t) {
+  const P = player;
+  P.deafT = Math.max(P.deafT, t); P.deafMax = P.deafT;
+  hurtFlash = Math.max(hurtFlash, .5); shake = Math.max(shake, 10);
+  if (AU.ctx && !AU.muted) {
+    tone({ vol: .09, dur: t, f0: 6400, f1: 5900, type: 'sine', echo: 0, attack: .01 });
+    AU.master.gain.cancelScheduledValues(AU.ctx.currentTime);
+    AU.master.gain.setTargetAtTime(.25, AU.ctx.currentTime, .03);
+    AU.master.gain.setTargetAtTime(.85, AU.ctx.currentTime + t * .7, t * .15);
+  }
+  callout('DEAFENED', 'YOUR ECHOES ARE SHORT · WAIT IT OUT', 1);
+  if (!MS.said.deaf) { MS.said.deaf = 1; radio('MARCUS', "A ringer. Your ears are shot for a few seconds. Don't trust anything you hear. Move."); }
+}
+function fakeHit(x, y, r) {
+  for (let i = MS.fakes.length - 1; i >= 0; i--) {
+    const f = MS.fakes[i];
+    if (Math.hypot(f.x - x, f.y - y) < r) { MS.fakes.splice(i, 1); fakePop(f); return true; }
+  }
+  return false;
+}
+function fakePop(f) {
+  popups.push({ x: f.x, y: f.y - 30, text: 'FAKE', t: time, c: 0, size: 15, vy: -14, pop: true });
+  sparks(f.x, f.y, 0, 14, 4, 260, PI); ring(f.x, f.y, 4, 60, 4, .4, 2);
+  if (AU.ctx && !AU.muted) { const s = spat(f.x, f.y, 1000); noise({ pan: s.pan, vol: .2 * s.vol, dur: .2, f0: 5000, f1: 900, type: 'bandpass', q: 2, echo: .3 }); }
+}
+function bossFakes(e) {
+  const P = player, [x0, y0, x1, y1] = BOSS.box;
+  let n = 0;
+  for (let k = 0; k < 40 && n < 2; k++) {
+    const x = rand(x0, x1) * T, y = rand(y0, y1) * T;
+    if (!passable(Math.floor(x / T), Math.floor(y / T)) || Math.hypot(x - P.x, y - P.y) < 200 || Math.hypot(x - e.tx, y - e.ty) < 160) continue;
+    addFake(x, y, 'boss', e.hideT + 2.6, null); n++;
+  }
+  if (!MS.said.bossFake) { MS.said.bossFake = 1; radio('CONDUCTOR', 'Which one of me is real, Calder?'); }
+}
+function updTools(dt) {
+  const P = player;
+  for (let i = MS.ringers.length - 1; i >= 0; i--) {
+    const r = MS.ringers[i];
+    if (!r.landed) {
+      r.t += dt; r.rot += dt * 16; const k = Math.min(1, r.t / r.dur);
+      r.x = lerp(r.x0, r.x1, k); r.y = lerp(r.y0, r.y1, k);
+      if (solidAtPt(r.x, r.y)) { r.x1 = r.x - (r.x1 - r.x0) * .04; r.y1 = r.y - (r.y1 - r.y0) * .04; r.x = r.x1; r.y = r.y1; r.t = r.dur; }
+      if (r.t >= r.dur) { r.landed = true; SFX.click(r.x, r.y); emitSound(r.x, r.y, { hear: 0, reveal: 70, col: 1, owner: 'enemy', str: .9 }); }
+      continue;
+    }
+    r.fuse -= dt;
+    if (r.fuse <= 0) {
+      MS.ringers.splice(i, 1);
+      emitSound(r.x, r.y, { hear: 0, reveal: 380, col: 1, owner: 'enemy', str: 1, force: true, ind: true });
+      ring(r.x, r.y, 6, 200, 3, .5, 4); ring(r.x, r.y, 6, 120, 1, .35, 2); light(r.x, r.y, 260, 3, .35, 1);
+      if (AU.ctx && !AU.muted) { const s = spat(r.x, r.y, 1600); tone({ pan: s.pan, vol: .3 * s.vol + .05, dur: .7, f0: 3400, f1: 5200, type: 'square', echo: .6 }); noise({ pan: s.pan, vol: .45 * s.vol, dur: .5, f0: 7000, f1: 2000, type: 'highpass', echo: .5 }); }
+      const d = Math.hypot(P.x - r.x, P.y - r.y);
+      if (d < 210 && !P.dead && los(r.x, r.y, P.x, P.y)) deafen(d < 120 ? 5 : 3.5);
+    }
+  }
+  for (let i = MS.fakes.length - 1; i >= 0; i--) {
+    const f = MS.fakes[i];
+    if (f.exposed && time > f.exposed + .9) { MS.fakes.splice(i, 1); fakePop(f); continue; }
+    if (time > f.end) { MS.fakes.splice(i, 1); continue; }
+    if (f.tgt && !f.exposed) {
+      const dx = f.tgt.x - f.x, dy = f.tgt.y - f.y, d = Math.hypot(dx, dy);
+      if (d > 30) { const s = 70 * dt, nx = f.x + dx / d * s, ny = f.y + dy / d * s; if (!solidAtPt(nx, ny)) { f.x = nx; f.y = ny; f.walk += s * .13; } f.a = Math.atan2(dy, dx); }
+    }
+    f.stepT -= dt;
+    if (f.stepT <= 0 && !f.exposed) {
+      f.stepT = f.kind === 'boss' ? .9 : .5;
+      emitSound(f.x, f.y, { hear: 0, reveal: f.kind === 'boss' ? 150 : 95, col: 1, owner: 'enemy', str: .6, trail: f.kind !== 'boss' });
+      if (f.kind === 'boss') { if (AU.ctx && !AU.muted) { const s = spat(f.x, f.y, 2200); tone({ pan: s.pan, vol: .1 * s.vol + .02, dur: .9, f0: 98, f1: 96, type: 'sawtooth', echo: .5, attack: .15 }); } }
+      else SFX.step(f.x, f.y, .3, false);
+      f.litS = .9; f.litT = time; f.gx = f.x; f.gy = f.y; f.ga = f.a; f.gw = f.walk;
+    }
+  }
+}
+
+// ---------- per-frame ----------
+function updSquad(dt) {
+  const P = player; if (P.dead) return;
+  MS.sqCD -= dt; MS.toolCD -= dt;
+  if (P.deafT > 0) P.deafT = Math.max(0, P.deafT - dt);
+  let c = 0;
+  for (const e of enemies) {
+    if (e.dead) continue;
+    const d = Math.hypot(e.x - P.x, e.y - P.y);
+    if (e.state === 'hunt' && !e.hidden && e.type !== 'boss' && d < 650) c++;
+    e.quiet = !!(e.order && !e.order.bait) || (MS.blind && e.state === 'hunt' && d < 460 && !(e.rushT > time));
+  }
+  if (c) learn(dt * .012 * Math.min(3, c));
+  updPlan();
+  if (!MS.sq && MS.sqCD <= 0 && MS.phase !== 'boss') formPlan();
+  if (MS.blind && MS.toolCD <= 0) useTool();
+  updTools(dt);
+}
+
+// ---------- drawing ----------
+function drawFakes() {
+  for (const f of MS.fakes) {
+    const fa = flash(f.litS, f.litT);
+    if (f.exposed && time > f.exposed) {
+      const k = (time - f.exposed) / .9;
+      for (let i = 0; i < 3; i++) drawCharacter(f.gx + rand(-8, 8), f.gy + rand(-4, 4), { kind: f.kind, rim: 'enemy', weapon: ETYPE[f.kind].w, a: f.ga ?? f.a, ph: 0, mv: 0, alpha: (1 - k) * .45, additive: true, hurt: 1 });
+      ctx.save(); ctx.font = `700 12px ${FONT}`; ctx.textAlign = 'center'; ctx.fillStyle = rgba(VIO, 1 - k); ctx.fillText('FALSE ECHO', f.gx, f.gy - 34); ctx.restore();
+      continue;
+    }
+    if (fa > .02) drawCharacter(f.gx, f.gy, { kind: f.kind, rim: 'enemy', weapon: ETYPE[f.kind].w, a: f.ga ?? f.a, ph: (f.gw || 0) * .575, mv: f.tgt ? 1 : 0, run: false, alpha: fa });
+  }
+}
+function drawSquadFX() {
+  for (const r of MS.ringers) {
+    const h = r.landed ? 0 : Math.sin(Math.min(1, r.t / r.dur) * PI) * 26;
+    ctx.fillStyle = rgba(CARR[1], .25); ctx.beginPath(); ctx.ellipse(r.x, r.y, 4, 2.5, 0, 0, TAU); ctx.fill();
+    ctx.save(); ctx.translate(r.x, r.y - h); ctx.rotate(r.rot);
+    ctx.strokeStyle = rgba(CARR[3], 1); ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(0, 0, 4.5, 0, TAU); ctx.moveTo(-6, 0); ctx.lineTo(6, 0); ctx.stroke(); ctx.restore();
+    if (r.landed) { const k = 1 - r.fuse / .5; ctx.strokeStyle = rgba(CARR[1], .4 + .5 * k); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(r.x, r.y, 210 * k, 0, TAU); ctx.stroke(); }
+  }
+}
+function drawSquadHUD(S, pad) {
+  const P = player;
+  // suspicion: how close they are to working out what you are
+  if (state === 'playing' || state === 'paused') {
+    const x = pad, y = pad + 116 * S, w = 250 * S;
+    if (MS.blind) {
+      const a = .75 + .25 * Math.sin(realT * 4);
+      text("THEY KNOW YOU'RE BLIND", x + 4 * S, y, 11 * S, CARR[1], a, 'left', 700, `${3 * S}px`);
+      if (MS.sq && !MS.sq.go) text(`SQUAD · ${MS.sq.type.toUpperCase()}`, x + 4 * S, y + 16 * S, 10 * S, CARR[1], .6 + .4 * Math.sin(realT * 9), 'left', 700, `${3 * S}px`);
+    } else if (MS.intel > .02) {
+      text('SUSPICION', x + 4 * S, y, 9 * S, CARR[3], .55, 'left', 600, `${3 * S}px`);
+      const bx = x + 78 * S, bw = w - 82 * S;
+      ctx.fillStyle = rgba(CARR[3], .08); ctx.fillRect(bx, y - 2 * S, bw, 4 * S);
+      ctx.fillStyle = rgba(MS.intel > .7 ? CARR[1] : CARR[2], .9); ctx.fillRect(bx, y - 2 * S, bw * MS.intel, 4 * S);
+    }
+  }
+  if (P.deafT > 0 && state === 'playing') {
+    const k = clamp(P.deafT / (P.deafMax || 1), 0, 1);
+    const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * .15, W / 2, H / 2, Math.max(W, H) * .7);
+    g.addColorStop(0, 'rgba(230,240,255,0)'); g.addColorStop(1, `rgba(230,240,255,${.28 * k})`);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    const y = H * .7;
+    glitchText('DEAFENED', W / 2 + (Math.random() - .5) * 6 * k, y, 20 * S, CARR[3], .5 + .4 * k, 'center', 700, `${8 * S}px`, 2 * k);
+    ctx.fillStyle = rgba(CARR[3], .15); ctx.fillRect(W / 2 - 80 * S, y + 16 * S, 160 * S, 2);
+    ctx.fillStyle = rgba(CARR[3], .8); ctx.fillRect(W / 2 - 80 * S, y + 16 * S, 160 * S * k, 2);
   }
 }
 
@@ -1535,6 +2434,8 @@ function updBullets(dt) {
         break;
       }
       for (const br of barrels) if (!br.gone && Math.hypot(br.x - b.x, br.y - b.y) < br.r + 2) { dead = true; explode(br); break; }
+      if (!dead && gadgetBulletHit(b)) dead = true;
+      if (!dead && b.o === 'p' && fakeHit(b.x, b.y, 18)) dead = true;
       if (dead) break;
       for (const e of enemies) if (!e.dead && !e.hidden && e !== b.src && Math.hypot(e.x - b.x, e.y - b.y) < e.r + 3) {
         dead = true; damageEnemy(e, b.dmg, b.o === 'p' ? 'gun' : 'friendly', false); break;
@@ -1629,6 +2530,7 @@ function update(dt) {
     else if (c === 'Space') dash();
     else if (c === 'KeyF') melee();
     else if (c === 'KeyE') throwDecoy();
+    else if (c === 'KeyG') castPhantom();
     else if (c === 'KeyR') startReload();
     else if (c === 'Digit1') switchWeapon('pistol');
     else if (c === 'Digit2') switchWeapon('shotgun');
@@ -1642,6 +2544,8 @@ function update(dt) {
   for (const e of enemies) if (!e.dead) updEnemy(e, dt);
   separateEnemies();
   updPhases(dt);
+  updGadgets(dt);
+  updSquad(dt);
   updBullets(dt);
   updDecoys(dt);
   updReveals();
@@ -1991,8 +2895,8 @@ const GUN = {
   pistol: { grip: 15, len: 12, wd: 2.4 }, shotgun: { grip: 11, len: 27, wd: 2.8 }, smg: { grip: 13, len: 17, wd: 3 },
   rifle: { grip: 10, len: 31, wd: 2.6 }, heavygun: { grip: 10, len: 26, wd: 4.6 },
 };
-const KSCALE = { player: 1, hunter: 1, gunner: 1.02, assassin: .92, heavy: 1.3, boss: 1.55 };
-const HALFW = { player: 15.5, hunter: 15.5, gunner: 15.5, assassin: 13.5, heavy: 18, boss: 19 };
+const KSCALE = { player: 1, jammer: 1, hunter: 1, gunner: 1.02, assassin: .92, heavy: 1.3, boss: 1.55 };
+const HALFW = { player: 15.5, jammer: 15.5, hunter: 15.5, gunner: 15.5, assassin: 13.5, heavy: 18, boss: 19 };
 
 function drawGunTop(wp, G, light) {
   const L = G.len, d = G.wd, fill = light ? '#d6e3ec' : BODY;
@@ -2136,6 +3040,15 @@ function drawHeadTop(k, o) {
     ctx.beginPath(); ctx.arc(.5, 0, 8.2, 0, TAU); body(null, 1.6);
     ctx.strokeStyle = 'rgba(255,150,165,1)'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.arc(.5, 0, 6, -.85, .85); ctx.stroke();
     ctx.strokeStyle = rgba(RC.glow, .6); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-7, 0); ctx.lineTo(3, 0); ctx.stroke();
+    return;
+  }
+  if (k === 'jammer') {
+    // transmitter pack on the back, twin antennae blinking
+    ctx.beginPath(); ctx.rect(-16, -6.5, 8, 13); body(null, 1.3);
+    ctx.strokeStyle = rgba(VIO, .95); ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(-14, -5); ctx.lineTo(-23, -10); ctx.moveTo(-14, 5); ctx.lineTo(-23, 10); ctx.stroke();
+    ctx.fillStyle = rgba(VIO, .6 + .4 * Math.sin(realT * 9)); ctx.beginPath(); ctx.arc(-23, -10, 1.7, 0, TAU); ctx.arc(-23, 10, 1.7, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(1, 0, 7.4, 0, TAU); body(null, 1.5);
+    ctx.strokeStyle = rgba(VIO, .85); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(1, 0, 5.4, -.9, .9); ctx.stroke();
     return;
   }
   if (k === 'assassin') {
@@ -2458,16 +3371,16 @@ function drawWorld(showPlayer) {
   ctx.translate(W / 2 + sx, H / 2 + sy); ctx.rotate(camRot); ctx.scale(ZE, ZE); ctx.translate(-cam.x, -cam.y);
   vx0 = cam.x - W / 2 / ZE - 80; vx1 = cam.x + W / 2 / ZE + 80; vy0 = cam.y - H / 2 / ZE - 80; vy1 = cam.y + H / 2 / ZE + 80;
   ctx.globalCompositeOperation = 'lighter';
-  drawFloors(); drawDecals(); drawTrails(); drawWaves(); drawLights(); drawExit(); drawHints(); drawPickups();
+  drawFloors(); drawDecals(); drawTrails(); drawWaves(); drawLights(); drawExit(); drawHints(); drawTraps(); drawJams(); drawPickups();
   ctx.globalCompositeOperation = 'source-over';
   {
     const t = ctx.getTransform();
     plx.setTransform(1, 0, 0, 1, 0, 0); plx.clearRect(0, 0, plc.width, plc.height); plx.setTransform(t);
-    ctx = plx; drawEnemies(); if (showPlayer) { drawMarks(); drawPlayer(); } ctx = wctx; playerLayerUsed = true;
+    ctx = plx; drawEnemies(); drawFakes(); if (showPlayer) { drawPhantom(); drawMarks(); drawPlayer(); } ctx = wctx; playerLayerUsed = true;
   }
   ctx.globalCompositeOperation = 'lighter';
   drawEdges(); drawDoors(); drawBarrels();
-  drawBullets(); drawParticles(); drawBossFX(); drawPopups();
+  drawBullets(); drawParticles(); drawBossFX(); drawSquadFX(); drawPopups();
   ctx.globalCompositeOperation = 'source-over';
   ctx.restore();
 }
@@ -2694,10 +3607,14 @@ function drawHUD(dt) {
       text(lab, x, yy + r + 12 * S, 9 * S, Wt, .5, 'center', 600, `${2 * S}px`);
       if (count !== undefined) { text(`×${count}`, x + r - 2 * S, yy - r + 4 * S, 11 * S, count > 0 ? A : CARR[1], .95, 'center', 700); }
     };
-    ab(bx - 72 * S, 'Q', 'SONAR', P.sonarCD, 3.2, 'q');
-    ab(bx, '␣', MS.target ? 'STRIKE' : 'DASH', MS.target ? 0 : P.dashCD, .8, 'sp');
-    if (MS.target) { hexPath(bx, yy, 24 * S + 5 + Math.sin(realT * 10) * 2); ctx.strokeStyle = rgba(C, .9); ctx.lineWidth = 2; ctx.stroke(); }
-    ab(bx + 72 * S, 'E', 'DECOY', P.decoys > 0 ? 0 : 1, 1, 'e', P.decoys);
+    const qx = bx - 108 * S, sx = bx - 36 * S, gx = bx + 108 * S;
+    ab(qx, 'Q', P.jammed ? 'JAMMED' : 'SONAR', P.sonarCD, 3.2, 'q');
+    if (P.jammed) { ctx.strokeStyle = rgba(VIO, .9); ctx.lineWidth = 2.2; hexPath(qx, yy, 24 * S); ctx.stroke(); ctx.beginPath(); ctx.moveTo(qx - 13 * S, yy - 13 * S); ctx.lineTo(qx + 13 * S, yy + 13 * S); ctx.stroke(); }
+    ab(sx, '␣', MS.target ? 'STRIKE' : 'DASH', MS.target ? 0 : P.dashCD, .8, 'sp');
+    if (MS.target) { hexPath(sx, yy, 24 * S + 5 + Math.sin(realT * 10) * 2); ctx.strokeStyle = rgba(C, .9); ctx.lineWidth = 2; ctx.stroke(); }
+    ab(bx + 36 * S, 'E', 'DECOY', P.decoys > 0 ? 0 : 1, 1, 'e', P.decoys);
+    ab(gx, 'G', phantom ? 'SHATTER' : 'PHANTOM', phantom ? 0 : P.phantomCD, PHANTOM_CD, 'g');
+    if (phantom) { hexPath(gx, yy, 24 * S + 4 + Math.sin(realT * 8) * 2); ctx.strokeStyle = rgba(C, .8); ctx.lineWidth = 1.6; ctx.stroke(); }
     // noise meter
     const nw = 220 * S, nx = bx - nw / 2, ny = yy - 50 * S, nk = clamp(P.noise / 820, 0, 1), segs = 22;
     text('NOISE', nx - 10 * S, ny + 3 * S, 9 * S, Wt, .5, 'right', 600, `${2 * S}px`);
@@ -2756,6 +3673,8 @@ function drawHUD(dt) {
     text(s, W / 2 - tw / 2, y, sz, CARR[msg.col], a, 'left', 700, `${4 * S}px`);
   }
   drawMissionHUD(S, pad);
+  drawGadgetHUD(S, pad);
+  drawSquadHUD(S, pad);
 }
 function showMsg(t, c) { msg.text = t; msg.t = realT; msg.col = c ?? 3; }
 function drawCursor() {
@@ -2842,10 +3761,11 @@ function drawTitle() {
   const rows = [
     ['WASD', 'Move — every step is a sound'], ['SHIFT', 'Run — faster, louder'], ['SPACE', 'Dash  ·  on a marked enemy: ECHO STRIKE'],
     ['Q', 'Sonar — marks enemies. They hear it too.'], ['CLICK', 'Shoot — lights the room, wakes the house'],
-    ['F / RMB', 'Knife — silent. Backstabs kill anything.'], ['E', 'Throw decoy — noise elsewhere'],
+    ['F / RMB', 'Knife — silent. Cuts wires, disarms mines.'], ['E', 'Throw decoy — noise elsewhere'],
+    ['G', 'Phantom — a false you. G again: shatter + freeze'],
     ['1 – 4', 'Switch weapon'], ['R', 'Reload'], ['ESC', 'Pause'],
   ];
-  const py = byy + bh + 58 * s, pw = Math.min(W - x0 - 40, 720 * s), ph = 5 * 30 * s + 44 * s;
+  const py = byy + bh + 58 * s, pw = Math.min(W - x0 - 40, 720 * s), ph = Math.ceil(rows.length / 2) * 30 * s + 44 * s;
   panel(x0, py, pw, ph, 1);
   text('CONTROLS', x0 + 16 * s, py + 16 * s, 10 * s, CARR[0], .8, 'left', 700, `${4 * s}px`);
   rows.forEach(([k, v], i) => {
@@ -2976,13 +3896,13 @@ function frame(now) {
 }
 
 function beginPrologue() {
-  initAudio();
+  initAudio(); voPreload();
   if (!window.EchoPrologue) { startGame(false); return; }
   state = 'prologue';
   window.EchoPrologue.play(() => startGame(false));
 }
 function startGame(fromCheckpoint) {
-  initAudio();
+  initAudio(); voPreload(); voStopAll();
   if (!fromCheckpoint) checkpoint = null;
   buildLevel(fromCheckpoint ? checkpoint : null);
   state = 'playing'; fadeT = realT;
@@ -3027,6 +3947,6 @@ requestAnimationFrame(frame);
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="prologue.js"></script>
+<script src="prologue.js?v=6"></script>
 </body>
 </html>
