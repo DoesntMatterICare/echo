@@ -18,6 +18,9 @@ VOICES = {
     'MARCUS': ('en-US-GuyNeural', '-4%', '-4Hz'),
     'CONDUCTOR': ('en-GB-ThomasNeural', '-18%', '-14Hz'),
     'LENA': ('en-US-AvaNeural', '-10%', '+0Hz'),
+    'FOREMAN': ('en-US-EricNeural', '-10%', '-25Hz'),
+    'PA': ('en-US-JennyNeural', '-6%', '-2Hz'),
+    'FAKE': ('en-US-GuyNeural', '-12%', '-24Hz'),
     'E1': ('en-US-SteffanNeural', '+8%', '-6Hz'),
     'E2': ('en-US-RogerNeural', '+6%', '-10Hz'),
     'E3': ('en-GB-RyanNeural', '+8%', '-8Hz'),
@@ -29,13 +32,27 @@ def js_unescape(s):
 
 
 def collect():
-    game = io.open(os.path.join(ROOT, 'echo.html'), encoding='utf-8').read()
+    game_file = next(f for f in ('index.html', 'echo.html') if os.path.exists(os.path.join(ROOT, f)))
+    game = io.open(os.path.join(ROOT, game_file), encoding='utf-8').read()
     pro = io.open(os.path.join(ROOT, 'prologue.js'), encoding='utf-8').read()
     lines = []  # (speaker, text), prologue first so it decodes first
     for who, text in re.findall(r"\{ at: [\d.]+,(?: who: '([A-Z]+)',)? text: '((?:[^'\\]|\\.)*)' \}", pro):
         lines.append((who or 'ECHO', js_unescape(text)))
     for who, q in re.findall(r"radio\('([A-Z]+)',\s*(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')\)", game):
         lines.append((who, js_unescape(q[1:-1])))
+    # Elias's thought captions: thought('text')
+    for q in re.findall(r"thought\((\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')\)", game):
+        lines.append(('ECHO', js_unescape(q[1:-1])))
+    # cutscene lines: say: ['WHO', 'text']
+    for who, q in re.findall(r"say: \['([A-Z]+)',\s*(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')\]", game):
+        lines.append((who, js_unescape(q[1:-1])))
+    # extra per-level lines (briefings, PA announcements)
+    for blk in game.split('/*vojson*/')[1:]:
+        vo = json.loads(blk.split('/*endvo*/', 1)[0])
+        for t in vo.get('PA', []):
+            lines.append(('PA', t))
+        for who, t in vo.get('brief', []):
+            lines.append((who, t))
     barks = json.loads(game.split('/*json*/', 1)[1].split('/*end*/', 1)[0])
     for texts in barks.values():
         for t in texts:
