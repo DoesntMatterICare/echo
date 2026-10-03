@@ -14,7 +14,7 @@
 <body>
 <canvas id="c"></canvas>
 <script src="assets/sfx/sfx.js?v=3"></script>
-<script src="assets/voice/vo.js?v=8"></script>
+<script src="assets/voice/vo.js?v=10"></script>
 <script>
 'use strict';
 // =====================================================================
@@ -436,7 +436,7 @@ function buildLevel(cp) {
 function saveCheckpoint() {
   const P = player;
   checkpoint = {
-    key: true, time, stats: { ...stats }, phase: LV.id === 2 ? MS.phase : MS.phase === 'escape' ? 'escape' : MS.phase === 'boss' ? 'boss' : MS.phase === 'lights' ? 'lights' : 'vault',
+    key: LV.id === 2 ? MS.phase !== 'relays' : true, relays: relays.filter(r => r.gone).map(r => r.id), time, stats: { ...stats }, phase: LV.id === 2 ? MS.phase : MS.phase === 'escape' ? 'escape' : MS.phase === 'boss' ? 'boss' : MS.phase === 'lights' ? 'lights' : 'vault',
     lampsOut: lamps.filter(l => l.gone).map(l => l.id),
     dead: enemies.filter(e => e.dead).map(e => e.id),
     taken: pickups.filter(p => p.taken).map(p => p.id),
@@ -715,7 +715,7 @@ function updEnemy(e, dt) {
   if (e.type === 'jammer') updJammer(e, dt, age);
   if (e.type === 'hound') sniff(e);
   switch (e.state) {
-    case 'windup': e.wT -= dt; e.a = turnTo(e.a, Math.atan2(P.y - e.y, P.x - e.x), dt * 7); if (e.wT <= 0) meleeStrike(e); return;
+    case 'windup': e.wT -= dt; e.a = turnTo(e.a, Math.atan2(P.y - e.y, P.x - e.x), dt * 7); if (e.wT <= 0) { meleeStrike(e); if (e.type === 'hound') { e.cd = 1.6; e.state = 'hunt'; } } return; // a dog bites, then backs off
     case 'aim':
       e.wT -= dt; if (e.know) e.a = turnTo(e.a, Math.atan2(e.know.y - e.y, e.know.x - e.x), dt * 10);
       if (e.wT <= 0) { if (e.type === 'heavy') { fireEnemy(e, 7, .42); e.cd = 2.1; e.state = 'hunt'; } else { e.burst = 3; e.bT = 0; e.state = 'burst'; } }
@@ -724,22 +724,33 @@ function updEnemy(e, dt) {
       e.bT -= dt;
       if (e.bT <= 0) { fireEnemy(e, 1, .075); e.burst--; e.bT = .12; if (e.burst <= 0) { e.state = 'hunt'; e.cd = 1.3; } }
       return;
+    case 'crouch': { // a hound gathers itself before it jumps — your moment to move
+      e.cT -= dt; e.moveAmt = 0; e.a = turnTo(e.a, Math.atan2(P.y - e.y, P.x - e.x), dt * 5);
+      if (e.cT <= 0) { e.state = 'lunge'; e.lT = .24; e.lvx = Math.cos(e.a) * 520; e.lvy = Math.sin(e.a) * 520; }
+      return;
+    }
     case 'lunge': {
       e.lT -= dt; const ox = e.x, oy = e.y;
       moveCircle(e, e.lvx * dt, e.lvy * dt, e.r, false); enemyStep(e, Math.hypot(e.x - ox, e.y - oy), true);
       e.moveAmt = 1;
       if (Math.random() < .5) afterimages.push({ x: e.x, y: e.y, a: e.a, t: time, w: e.walk, enemy: e.type });
-      if (Math.hypot(P.x - e.x, P.y - e.y) < 32 && !P.dead) { e.a = Math.atan2(P.y - e.y, P.x - e.x); meleeStrike(e); e.cd = 1.1; }
-      else if (e.lT <= 0) { e.state = 'hunt'; e.cd = .8; }
+      if (Math.hypot(P.x - e.x, P.y - e.y) < 32 && !P.dead) { e.a = Math.atan2(P.y - e.y, P.x - e.x); meleeStrike(e); e.cd = e.type === 'hound' ? 1.8 : 1.1; }
+      else if (e.lT <= 0) { e.state = 'hunt'; e.cd = e.type === 'hound' ? 1.5 : .8; }
       return;
     }
   }
   if ((e.state === 'hunt' || e.state === 'search') && !P.dead && e.cd <= 0) {
     if (e.type !== 'gunner' && dP < (e.type === 'heavy' ? 52 : 44) && age < .7) {
-      e.state = 'windup'; e.wT = e.wT0 = e.type === 'assassin' || e.type === 'hound' ? .1 : e.type === 'heavy' ? .35 : .22;
+      if (e.type === 'hound') comicWord(e.x, e.y - 20, 'GRRR', { col: INK.red, size: 18, life: .5 });
+      e.state = 'windup'; e.wT = e.wT0 = e.type === 'hound' ? .3 : e.type === 'assassin' ? .1 : e.type === 'heavy' ? .35 : .22;
       SFX.swish(); return;
     }
-    if ((e.type === 'assassin' || e.type === 'hound') && dP < 160 && dP > 46 && age < .5 && los(e.x, e.y, P.x, P.y)) {
+    if (e.type === 'hound' && dP < 140 && dP > 46 && age < .5 && los(e.x, e.y, P.x, P.y)) {
+      e.state = 'crouch'; e.cT = .45; e.a = Math.atan2(P.y - e.y, P.x - e.x);
+      comicWord(e.x, e.y - 20, 'GRRR', { col: INK.red, size: 18, life: .6 });
+      return;
+    }
+    if (e.type === 'assassin' && dP < 160 && dP > 46 && age < .5 && los(e.x, e.y, P.x, P.y)) {
       const a = Math.atan2(P.y - e.y, P.x - e.x); e.a = a;
       e.state = 'lunge'; e.lT = .26; e.lvx = Math.cos(a) * 560; e.lvy = Math.sin(a) * 560; return;
     }
@@ -880,7 +891,7 @@ function tryOpenDoor(d, who, isPlayer) {
   if (d.open) return true;
   if (d.locked) {
     if (isPlayer && player.key && LV.id === 1 && MS.phase !== 'boss' && MS.phase !== 'lights') { d.locked = false; if (d.pair) d.pair.locked = false; }
-    else { if (isPlayer && realT - msg.t > 1.5) showMsg(MS.phase === 'boss' ? 'SEALED IN — FINISH IT' : MS.phase === 'lights' ? 'SEALED — THE MAGLOCK RUNS ON THE LIGHTING GRID. KILL THE LIGHTS' : LV.lockedMsg, 1); return false; }
+    else { if (isPlayer && realT - msg.t > 1.5) showMsg(MS.phase === 'boss' ? 'SEALED IN — FINISH IT' : MS.phase === 'lights' && LV.id === 1 ? 'SEALED — THE MAGLOCK RUNS ON THE LIGHTING GRID. KILL THE LIGHTS' : LV.lockedMsg, 1); return false; }
   }
   openDoor(d, who, isPlayer);
   return true;
@@ -938,7 +949,7 @@ function die() {
       assassin: 'Assassins make no sound at all. Ping often when it goes quiet.',
       jammer: 'Jammers kill your sonar. Find the static and break it first.',
       hound: 'Hounds track you by scent, not sound. Keep moving, or knife them.',
-      boss: 'He vanishes into silence. Listen for the inhale, then strike.',
+      boss: LV.id === 2 ? 'He hunts by vibration. Stand still, then bait his charge into a wall or under a hammer.' : 'He vanishes into silence. Listen for the inhale, then strike.',
     };
     const name = killer ? KN[killer.type] || 'one of them' : null;
     MS.deathCause = name ? (P.lit ? `Shot in the light by ${name}.` : `Taken down by ${name}.`) : null;
@@ -1213,15 +1224,16 @@ function objectiveSrc(kp) {
     default: return kp && !kp.taken ? kp : null;
   }
 }
-function radio(who, text) { MS.rq.push({ who, text }); }
+function radio(who, text) { MS.rq.push({ who, text, t: time }); }
 function updRadio() {
   if (MS.radio && realT - MS.radio.t < MS.radio.dur) return;
   MS.radio = null;
+  MS.rq = MS.rq.filter(q => q.t == null || time - q.t < 15); // a line that waited too long is out of date: drop it
   if (!MS.rq.length) return;
   let qi = 0;
   if (MS.radioCut > time) { MS.rq = MS.rq.filter(q => q.who !== 'MARCUS'); if (!MS.rq.length) return; } // the line's dead: Marcus never gets through
   const r = MS.rq.splice(qi, 1)[0];
-  if (r.who === 'FAKE') MS.fakeAt = realT;
+  if (r.who === 'FAKE' || r.who === 'MIMIC') MS.fakeAt = realT;
   const vd = speak(r.who, r.text);
   MS.radio = { ...r, t: realT, dur: Math.max(2.4 + r.text.length / 19, vd + .8) };
   if (AU.ctx && !AU.muted && r.who !== 'ECHO') noise({ vol: .1, dur: .22, f0: 2400, type: 'bandpass', q: 3, echo: 0 });
@@ -1233,7 +1245,7 @@ function isMarked(e) { return e.markT != null && time >= e.markT && time <= e.ma
 function markFromSonar() {
   if (player.lit) { // the glare drowns the echo
     comicWord(player.x, player.y - 56, 'BZZZT', { col: INK.yellow, size: 22 });
-    if (!MS.said.glare) { MS.said.glare = 1; callout('HUM', 'THE BUZZING LAMPS DROWN YOUR PING', 2); }
+    if (!MS.said.glare) { MS.said.glare = 1; LV.id === 2 ? callout('ROAR', 'THE FURNACES DROWN YOUR PING', 2) : callout('HUM', 'THE BUZZING LAMPS DROWN YOUR PING', 2); }
     return;
   }
   const P = player;
@@ -1523,7 +1535,7 @@ function updEscape(dt) {
       const cands = (LV.spawns || SPAWNS).map(([x, y]) => ({ x: (x + .5) * T, y: (y + .5) * T })).filter(s => { const d = Math.hypot(s.x - player.x, s.y - player.y); return d > 420 && d < 1300; });
       for (let i = 0; i < 2 && cands.length; i++) {
         const s = cands.splice((Math.random() * cands.length) | 0, 1)[0];
-        const r = Math.random(), type = LV.id === 2 ? (r < .35 ? 'hound' : r < .62 ? 'hunter' : r < .88 ? 'gunner' : 'assassin') : r < .5 ? 'hunter' : r < .78 ? 'gunner' : r < .9 ? 'jammer' : 'assassin';
+        const r = Math.random(), type = LV.id === 2 ? (r < .15 ? 'hound' : r < .55 ? 'hunter' : r < .88 ? 'gunner' : 'assassin') : r < .5 ? 'hunter' : r < .78 ? 'gunner' : r < .9 ? 'jammer' : 'assassin';
         enemies.push(makeEnemy(type, s.x, s.y, 'r' + (MS.nid++)));
         emitSound(s.x, s.y, { hear: 0, reveal: 160, col: 1, owner: 'enemy', str: .9, ind: true });
         SFX.door(s.x, s.y);
@@ -1630,7 +1642,7 @@ function drawMissionHUD(S, pad) {
       const w = 470 * S, x = pad, hh = 78 * S, y = H - pad - 62 * S - 18 * S - hh;
       panel(x, y, w, hh, a);
       const col = r.who === 'CONDUCTOR' || r.who === 'FAKE' ? CARR[1] : r.who === 'ECHO' ? CARR[0] : CARR[2];
-      text(r.who === 'FAKE' ? 'MARCUS  · · ?' : r.who, x + 16 * S, y + 16 * S, 10 * S, col, a, 'left', 700, `${5 * S}px`);
+      text(r.who === 'FAKE' ? 'MARCUS  · · ?' : r.who === 'MIMIC' ? 'MARCUS' : r.who, x + 16 * S, y + 16 * S, 10 * S, col, a, 'left', 700, `${5 * S}px`);
       for (let i = 0; i < 14; i++) { const v = (Math.sin(realT * 18 + i * 1.3) * .5 + .5) * (k * 45 < r.text.length ? 1 : .15); ctx.fillStyle = rgba(col, .7 * a); ctx.fillRect(x + w - 20 * S - i * 5 * S, y + 16 * S - v * 6 * S, 3 * S, v * 12 * S + 1); }
       ctx.font = `500 ${14 * S}px ${FONT}`;
       const lines = wrapLines(r.text, w - 32 * S);
@@ -2073,6 +2085,7 @@ const VSTYLE = {
   FOREMAN: { echo: .38, lp: 6500, low: 7, gain: 1.45, rate: .96 },
   PA: { radio: true, echo: .75, gain: 1.15 },
   FAKE: { radio: true, echo: .35, gain: 1.4, rate: .94 },
+  MIMIC: { radio: true, echo: .1, gain: 1.45 },
 };
 function voEntry(key) { return window.VO_LINES && window.VO_LINES[key]; }
 function voDecode(key) {
@@ -2538,6 +2551,7 @@ const LEVEL2 = {
     ['ammo', 3, 33], ['decoy', 16, 41], ['shotgun', 38, 41], ['med', 25, 41], ['ammo', 39, 30],
     ['smg', 2, 23], ['ammo', 14, 13], ['med', 9, 15], ['decoy', 19, 14], ['ammo', 38, 21],
     ['med', 61, 40], ['decoy', 47, 29], ['ammo', 61, 28], ['med', 25, 1], ['ammo', 2, 5], ['decoy', 43, 19],
+    ['med', 43, 3], ['med', 60, 3], ['med', 43, 17], ['med', 60, 17], ['ammo', 49, 3], ['ammo', 55, 18], ['ammo', 52, 11],
   ],
   barrels: [[10, 40], [34, 40], [22, 15], [37, 20], [48, 39], [44, 3], [60, 18], [13, 3]],
   hints: [
@@ -2571,13 +2585,15 @@ const L2VO = /*vojson*/{
     ["ECHO", "Then I'll listen to it burn."],
     ["MARCUS", "Storm's coming in off the water. When it thunders, they won't hear a thing. Use it."],
     ["MARCUS", "And they've wired the yard to a PA. Every heart that stops gets called in. Cut the relays first."],
-    ["ECHO", "Let them count."]
+    ["ECHO", "Let them count."],
+    ["MARCUS", "One more thing. After the Archive, someone out there can wear my voice. If I send you anywhere, I'll tell you the engine's running first. No phrase, it isn't me."],
+    ["ECHO", "Then keep it running."]
   ]
 }/*endvo*/;
 LEVEL2.briefing = L2VO.brief;
 const LEVELS = [LEVEL1, LEVEL2];
 let LVI = 0, hammers = [], relays = [], BRF = null, TB = {}, rainNode = null;
-ETYPE.hound = { hp: 1, walk: 110, run: 300, ear: 1.25, stepR: 55, stride: 30, stepVol: .14, r: 10, pts: 250, w: 'none' };
+ETYPE.hound = { hp: 1, walk: 100, run: 235, ear: 1.25, stepR: 55, stride: 30, stepVol: .14, r: 10, pts: 250, w: 'none' };
 ETYPE.foreman = { hp: 30, walk: 100, run: 130, ear: 1.4, stepR: 190, stride: 52, stepVol: .7, r: 22, pts: 6000, w: 'sledge' };
 
 function setLevel(i) { LVI = i; LV = LEVELS[i]; checkpoint = null; CS = null; csHold = 0; }
@@ -2663,12 +2679,8 @@ function relayDown(r, silent) {
   shake = Math.max(shake, 6); hitstop = Math.max(hitstop, .05);
   SFX.nodeDown(r.x, r.y);
   if (left === relays.length - 1) radio('MARCUS', 'One relay down. Two to go.');
-  if (!left) {
-    MS.phase = 'hall';
-    for (const d of doors) if (LV.gates.some(([x, y]) => d.tx === x && d.ty === y)) d.locked = false;
-    cutGates();
-    saveCheckpoint();
-  }
+  if (!left) furnacesOn(); // the PA dies, so Kade lights the yard instead
+  else saveCheckpoint(); // every relay cut is progress you keep
 }
 function relayBulletHit(b) {
   for (const r of relays) if (!r.gone && Math.hypot(r.x - b.x, r.y - b.y) < 30) { if (b.o === 'p') relayDown(r, false); return true; }
@@ -2698,13 +2710,13 @@ function sniff(e) {
   e.sniffT = time + .3;
   let best = null;
   for (let i = trails.length - 1; i >= 0; i--) {
-    const t = trails[i]; if (time - t.t > 3.5) break;
+    const t = trails[i]; if (time - t.t > 2.4) break;
     if (t.c !== 0) continue;
-    if (Math.hypot(t.x - e.x, t.y - e.y) < 300 && (!best || t.t > best.t) && los(e.x, e.y, t.x, t.y)) best = t;
+    if (Math.hypot(t.x - e.x, t.y - e.y) < 220 && (!best || t.t > best.t) && los(e.x, e.y, t.x, t.y)) best = t;
   }
   if (!best || (e.know && best.t <= e.know.t)) return;
   e.know = { x: best.x, y: best.y, t: best.t };
-  if (e.state !== 'hunt' && e.state !== 'windup' && e.state !== 'lunge') {
+  if (e.state !== 'hunt' && e.state !== 'windup' && e.state !== 'lunge' && e.state !== 'crouch') {
     e.state = 'hunt'; e.path = null;
     popups.push({ x: e.x, y: e.y - 24, text: 'SNIFF', t: time, c: 1, size: 12, vy: -10 });
     SFX.dog(e.x, e.y);
@@ -2745,6 +2757,7 @@ function drawHound(x, y, o) {
 function startForeman(fromCp) {
   if (MS.phase === 'boss' || MS.bossDown) return;
   MS.phase = 'boss';
+  restockForBoss();
   for (const d of doors) if (LV.gates.some(([x, y]) => d.tx === x && d.ty === y)) { d.open = false; d.amt = 0; d.locked = true; }
   const [sx, sy] = LV.boss.spawn, e = makeEnemy('boss', (sx + .5) * T, (sy + .5) * T, 'boss');
   e.foreman = true; e.hp = e.maxhp = 30; e.r = 22; e.state = 'stalk'; e.cd = 2.2; e.summons = [.6, .3];
@@ -2786,13 +2799,34 @@ function foremanHurt(e, dmg) {
 function summonHounds(e) {
   const P = player, [x0, y0, x1, y1] = [42.5, 2.5, 61.5, 19.5];
   const corners = [[x0, y0], [x1, y0], [x0, y1 - 1], [x1, y1]].sort((a, b) => Math.hypot(b[0] * T - P.x, b[1] * T - P.y) - Math.hypot(a[0] * T - P.x, a[1] * T - P.y));
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < 1; i++) {
     const [cx, cy] = corners[i], h = makeEnemy('hound', cx * T, cy * T, 'b' + (MS.nid++));
     enemies.push(h); emitSound(h.x, h.y, { hear: 0, reveal: 200, col: 1, owner: 'enemy', str: 1, force: true, ind: true });
     SFX.dog(h.x, h.y);
   }
   if (!MS.said.fdogs) { MS.said.fdogs = 1; radio('FOREMAN', 'Dogs! Get up here!'); }
-  callout('HOUNDS', 'THEY FOLLOW YOUR TRAIL', 1);
+  supplyDrop(e);
+  callout('HOUND', 'IT FOLLOWS YOUR TRAIL · WATCH FOR THE CROUCH', 1);
+}
+function restockForBoss() {
+  const P = player, A = P.ammo;
+  P.hp = P.maxhp;
+  A.pistol.mag = WEAP.pistol.mag; A.pistol.res = Math.max(A.pistol.res, 36);
+  if (P.owned.shotgun) A.shotgun.res = Math.max(A.shotgun.res, 12);
+  if (P.owned.smg) A.smg.res = Math.max(A.smg.res, 60);
+  callout('RESTOCKED', 'FULL HEALTH · AMMO TOPPED UP · SUPPLIES IN THE HALL', 0);
+}
+function supplyDrop(e) { // a medkit and an ammo box, far from Kade
+  const spots = [[44, 6], [59, 6], [44, 15], [59, 15], [49, 3], [55, 18], [43, 11], [60, 11]]
+    .map(([x, y]) => ({ x: (x + .5) * T, y: (y + .5) * T })).sort((a, b) => Math.hypot(b.x - e.x, b.y - e.y) - Math.hypot(a.x - e.x, a.y - e.y));
+  ['med', 'ammo'].forEach((type, i) => {
+    const s = spots[i];
+    pickups.push(revealable({ id: 'drop' + (MS.nid++), type, x: s.x, y: s.y, taken: false, c: 2 }));
+    emitSound(s.x, s.y, { hear: 0, reveal: 160, col: 2, owner: 'env', str: 1, force: true });
+    light(s.x, s.y, 140, 2, .6, 1);
+    comicWord(s.x, s.y - 22, i ? 'CLUNK!' : 'SUPPLIES!', { col: INK.yellow, size: 18, range: 2400 });
+  });
+  callout('SUPPLY DROP', 'A MEDKIT AND AMMO JUST HIT THE FLOOR', 0);
 }
 function windCharge(e, t) {
   const k = e.know || player;
@@ -2891,7 +2925,7 @@ function startEscape2(fromCp) {
   MS.phase = 'escape'; MS.ledger = true; MS.escT = 75; MS.sirenT = .4; MS.spawnT = 3;
   for (const e of enemies) if (!e.dead) { e.know = { x: P.x, y: P.y, t: time }; e.state = 'hunt'; e.path = null; }
   const cands = LV.spawns.map(([x, y]) => ({ x: (x + .5) * T, y: (y + .5) * T })).filter(s => Math.hypot(s.x - P.x, s.y - P.y) > 500);
-  for (let i = 0; i < 3 && cands.length; i++) { const s = cands.splice((Math.random() * cands.length) | 0, 1)[0]; enemies.push(makeEnemy('hound', s.x, s.y, 'r' + (MS.nid++))); SFX.dog(s.x, s.y); }
+  for (let i = 0; i < 2 && cands.length; i++) { const s = cands.splice((Math.random() * cands.length) | 0, 1)[0]; enemies.push(makeEnemy('hound', s.x, s.y, 'r' + (MS.nid++))); SFX.dog(s.x, s.y); }
   cutEscape2(fromCp);
   if (!fromCp) saveCheckpoint();
   humT = .3; shake = Math.max(shake, 10);
@@ -2899,6 +2933,7 @@ function startEscape2(fromCp) {
 function initPhases2(cp) {
   MS.phase = cp ? cp.phase : 'relays';
   MS.thunderT = rand(7, 11); MS.stormMask = -9; MS.lightning = -9; MS.rumbleT = -9;
+  if (cp && cp.phase === 'lights') { MS.phase = 'lights'; gates2(true); lightsUp(true); lightsFight(true); }
   if (cp && cp.phase === 'boss') { MS.phase = 'hall'; startForeman(true); }
   if (cp && cp.phase === 'escape') {
     MS.bossDown = true; MS.ledger = true; MS.phase = 'ledger';
@@ -2908,6 +2943,7 @@ function initPhases2(cp) {
 }
 function objective2() {
   switch (MS.phase) {
+    case 'lights': return { t: `Shut the furnaces  ${lamps.filter(l => l.gone).length}/${lamps.length}  ·  echo offline`, s: 'FURNACES', c: CARR[2] };
     case 'hall': return { t: 'Enter the furnace hall', s: 'FURNACE HALL', c: CARR[2] };
     case 'boss': return { t: 'Break The Foreman', s: 'FOREMAN', c: CARR[1] };
     case 'ledger': return { t: 'Take the manifest', s: 'MANIFEST', c: CARR[2] };
@@ -2918,6 +2954,7 @@ function objective2() {
 function objectiveSrc2() {
   const P = player;
   switch (MS.phase) {
+    case 'lights': return nearestLamp();
     case 'hall': return { x: LV.boss.gate[0] * T, y: LV.boss.gate[1] * T };
     case 'boss': return null;
     case 'ledger': return pickups.find(p => p.type === 'ledger' && !p.taken) || null;
@@ -2934,6 +2971,7 @@ function updL2(dt) {
     if (r.humT <= 0) { r.humT = 3; if (Math.hypot(r.x - P.x, r.y - P.y) < 1000) { emitSound(r.x, r.y, { hear: 0, reveal: 90, col: 2, owner: 'env', str: .8 }); const s = spat(r.x, r.y, 1000); if (AU.ctx && !AU.muted) tone({ pan: s.pan, vol: .07 * s.vol, dur: .4, f0: 1180, f1: 1220, type: 'square', echo: .3 }); } }
   }
   if (MS.phase === 'hall' && !P.dead && P.x / T > 42.3 && P.y / T < 19.6) startForeman();
+  updEcho2(dt);
 }
 
 // ---------- drawing ----------
@@ -3197,7 +3235,7 @@ function engine() { if (AU.ctx && !AU.muted) { tone({ vol: .12, dur: 3, f0: 48, 
 
 function cutIntro() {
   if (LV.id === 2) return playCutscene([
-    { snap: csAt(52, 10, .5), card: ['THE FOUNDRY', 'THE RIVER  ·  2:14 AM  ·  STORM', 3.4], dur: 2.8, ping: csAt(52, 10, 900).slice(0, 2).concat([900, 3]),
+    { snap: csAt(52, 10, .5), card: ["ECHO #2: SHE'S STILL HUMMING", 'THE RIVER FOUNDRY  ·  2:14 AM  ·  STORM', 3.6], dur: 2.8, ping: csAt(52, 10, 900).slice(0, 2).concat([900, 3]),
       fn: () => { MS.lightning = realT; drone(); timers.push({ t: time + .4, cine: true, fn: () => { if (AU.ctx && !AU.muted) noise({ vol: .5, dur: 3, f0: 300, f1: 40, echo: .9, attack: .08 }); } }); } },
     { cam: csAt(28, 17, .62), dur: 3, fn: () => sweepPings([[22, 17, 420], [30, 17, 420], [37, 17, 420]], 2, .7) },
     { cam: csAt(10, 36, .72), say: ['MARCUS', "Storm's right on top of you. Every time it thunders, they can't hear you. Move then."], keep: true },
@@ -3245,7 +3283,7 @@ function cutEscape(fromCp) {
 function cutGates() {
   playCutscene([
     { cam: csAt(53, 19, .85), dur: 1.9, fn: () => { for (const d of doors) if (LV.gates.some(([x, y]) => d.tx === x && d.ty === y)) { d.open = true; d.amt = 0; } SFX.door(53 * T, 20 * T); emitSound(53 * T, 20 * T, { hear: 0, reveal: 420, col: 2, owner: 'env', str: 1, force: true }); } },
-    { cam: csAt(52, 10, .7), say: ['MARCUS', "PA's dead. The furnace hall is open. Kade's inside."], keep: true },
+    { cam: csAt(52, 10, .7), say: ['MARCUS', "Engine's running. The furnaces are cold and the hall is open. Kade's inside."], keep: true },
     { cam: csP(1), say: ['ECHO', "Then he's waiting for me."], keep: true },
   ]);
 }
@@ -3264,9 +3302,10 @@ function cutForeman(e, skip) {
 function cutForemanDown(e) {
   const x = e.x, y = e.y;
   playCutscene([
-    { cam: [x, y, 1.4], dur: 1.8 },
+    { cam: [x, y, 1.4], dur: 1.4 },
+    { say: ['FOREMAN', 'You think she was taken, Calder? She walked in.'], keep: true },
     { say: ['ECHO', 'Nothing left to hear.'], keep: true },
-    { cam: csP(1), say: ['MARCUS', "That's Kade. Grab the manifest and get to the north pier. I'm bringing the boat around."], keep: true },
+    { cam: csP(1), say: ['MARCUS', "Engine's running. That's Kade. Grab the manifest and get to the north pier. I'm bringing the boat around."], keep: true },
   ]);
 }
 function cutEscape2(fromCp) {
@@ -3274,7 +3313,7 @@ function cutEscape2(fromCp) {
   cine(fromCp, [
     { cam: () => { const d = dogs()[0]; return d ? [d.x, d.y, .8] : csAt(30, 20, .55); }, dur: 2.2,
       fn: () => dogs().forEach((h, i) => timers.push({ t: time + .3 + i * .35, cine: true, fn: () => { SFX.dog(h.x, h.y); emitSound(h.x, h.y, { hear: 0, reveal: 170, col: 1, owner: 'enemy', str: 1, force: true }); h.litS = 1.1; h.litT = time; h.gx = h.x; h.gy = h.y; } })) },
-    { say: ['MARCUS', "They're letting the dogs loose. North pier, Elias. Seventy-five seconds!"], keep: true },
+    { say: ['MARCUS', "They're letting the dogs loose. Engine's running. North pier, Elias. Seventy-five seconds!"], keep: true },
     { cam: csP(1), say: ['ECHO', 'I hear them coming.'], keep: true },
   ], () => callout('THE DOGS ARE OUT', 'REACH THE NORTH PIER · 75 SECONDS', 1, true));
 }
@@ -3284,7 +3323,8 @@ function extract() {
   MS.phase = 'extract';
   const P = player, o = exitObj;
   const lines = LV.id === 2
-    ? [{ say: ['MARCUS', "Get in. That's two of them."] }, { say: ['ECHO', "There are more names in the manifest."] }, { say: ['MARCUS', 'There always are.'] }]
+    ? [{ say: ['MARCUS', "Get in. That's two of them."] }, { say: ['ECHO', "There are more names in the manifest."] }, { say: ['MARCUS', 'There always are.'] },
+       { dur: 4.6, card: ['SHE WALKED IN.', 'TO BE CONTINUED  ·  ECHO #3: THE CHOIR', 4.6, INK.yellow], fn: () => { play('static', { vol: .5 }); play('lena', { vol: .85, rev: .8, jit: 0, delay: .4 }); } }]
     : [{ say: ['MARCUS', "Get in. You're bleeding."] }, { say: ['ECHO', 'Not mine.'] },
        { dur: 4.4, card: ["SHE'S STILL HUMMING.", 'TO BE CONTINUED  ·  ECHO #2', 4.4, INK.yellow], fn: () => { play('static', { vol: .5 }); play('lena', { vol: .8, rev: .8, jit: 0, delay: .4 }); } }];
   playCutscene([
@@ -3627,7 +3667,7 @@ Object.assign(SFX, {
 // =====================================================================
 //  ECHO #1: LIGHTS ON — comic sound lettering · speech bubbles · flashlights · the lights-on twist
 // =====================================================================
-const ONLY_L1 = true; // hackathon build: Level 1 only (Level 2 stays in the code, hidden)
+const ONLY_L1 = false; // hackathon build: Level 1 only (Level 2 stays in the code, hidden)
 const LAMPS1 = [[6, 2], [13, 3], [5, 8], [22, 2], [32, 3], [42, 2], [30, 9]];
 const FLASH_IDS = [2, 7, 8, 10, 12];
 const INK = { cyan: [90, 230, 255], red: [255, 74, 84], yellow: [255, 208, 46], blue: [130, 150, 255], white: [244, 247, 255], orange: [255, 140, 40], violet: [195, 125, 255], paper: [239, 230, 210] };
@@ -3713,15 +3753,15 @@ function drawComic() {
 // ---------- lamps: light is the danger ----------
 function buildComic(cp) {
   comicFx = []; powerT = -99;
-  lamps = (LV.id === 1 ? LAMPS1 : []).map(([x, y], id) => ({ id, x: (x + .5) * T, y: (y + .5) * T, r: 250, on: false, gone: !!(cp && cp.lampsOut && cp.lampsOut.includes(id)), revT: rand(0, .3), poly: null, swing: rand(0, 6) }));
-  if (cp && (cp.phase === 'vault' || cp.phase === 'boss' || cp.phase === 'escape')) for (const l of lamps) l.gone = true; // the lights are long dead by then
+  lamps = (LV.id === 1 ? LAMPS1 : LV.id === 2 ? FURN2 : []).map(([x, y], id) => ({ id, furnace: LV.id === 2, x: (x + .5) * T, y: (y + .5) * T, r: LV.id === 2 ? 280 : 250, on: false, gone: !!(cp && cp.lampsOut && cp.lampsOut.includes(id)), revT: rand(0, .3), poly: null, swing: rand(0, 6) }));
+  if (cp && ['vault', 'boss', 'escape', 'hall', 'ledger'].includes(cp.phase)) for (const l of lamps) l.gone = true; // the lights are long dead by then
   for (const e of enemies) e.flash = LV.id === 1 && FLASH_IDS.includes(e.id);
 }
 function litAt(x, y) { for (const l of lamps) if (l.on && Math.hypot(l.x - x, l.y - y) < l.r && los(l.x, l.y, x, y)) return l; return null; }
 function nearestLamp() { const P = player; let b = null, bd = 1e9; for (const l of lamps) if (l.on) { const d = Math.hypot(l.x - P.x, l.y - P.y); if (d < bd) { bd = d; b = l; } } return b; }
 function relockVault() { for (const d of doors) if (BOSS.doors.some(([x, y]) => d.tx === x && d.ty === y)) { d.open = false; d.amt = 0; d.locked = true; } }
 function lightsUp(quiet) {
-  for (const l of lamps) if (!l.gone) { l.on = true; if (!quiet) comicWord(l.x, l.y - 10, 'KA-CHUNK!', { col: INK.yellow, size: 22, range: 3000, delay: rand(0, .35) }); }
+  for (const l of lamps) if (!l.gone) { l.on = true; if (!quiet) comicWord(l.x, l.y - 10, l.furnace ? 'WHOOMPH!' : 'KA-CHUNK!', { col: INK.yellow, size: 22, range: 3000, delay: rand(0, .35) }); }
   if (!quiet) { powerT = realT; play('door_slam', { vol: .9, rev: .5 }); play('hum_elec', { vol: .7, rev: .4, delay: .2 }); shake = Math.max(shake, 8); }
 }
 function powerOn() {
@@ -3738,14 +3778,14 @@ function powerOn() {
 function lampOut(l) {
   if (!l.on) return;
   l.on = false; l.gone = true;
-  comicWord(l.x, l.y - 6, 'PSSHT!', { col: INK.yellow, size: 26, burst: true, burstCol: INK.white, range: 2000 });
-  comicWord(l.x + 14, l.y + 18, 'TINK!', { col: INK.white, size: 20, delay: .14, range: 2000 });
+  comicWord(l.x, l.y - 6, l.furnace ? 'FWUMP!' : 'PSSHT!', { col: INK.yellow, size: 26, burst: true, burstCol: INK.white, range: 2000 });
+  comicWord(l.x + 14, l.y + 18, l.furnace ? 'HSSSS' : 'TINK!', { col: INK.white, size: 20, delay: .14, range: 2000 });
   play('shatter', { x: l.x, y: l.y, range: 1600, vol: .8 }); play('zap', { x: l.x, y: l.y, range: 1400, vol: .5, delay: .05 });
   emitSound(l.x, l.y, { hear: 260, reveal: 260, col: 2, owner: 'player', str: .9, force: true });
   sparks(l.x, l.y, PI / 2, 18, 2, 380, PI); light(l.x, l.y, 220, 2, .25, 1);
   stats.score += 250;
   const left = lamps.filter(o => o.on).length, n = lamps.length - left;
-  if (left) { callout(`${n}/${lamps.length}`, `${left} LIGHT${left > 1 ? 'S' : ''} LEFT`, 2); saveCheckpoint(); } // every lamp is progress you keep
+  if (left) { callout(`${n}/${lamps.length}`, `${left} ${l.furnace ? 'FURNACE' : 'LIGHT'}${left > 1 ? 'S' : ''} LEFT`, 2); saveCheckpoint(); } // every lamp is progress you keep
   else darkAgain();
 }
 // ---------- lights on: no echo, a fresh wave, guns only ----------
@@ -3756,11 +3796,11 @@ function echoOffline(what) {
   if (what === 'DISGUISE') { if (realT - msg.t > 1.2) showMsg('DISGUISE USELESS  ·  IN THE LIGHT THEY CAN SEE YOUR FACE', 1); SFX.jam(.3); return; }
   SFX.jam(.3);
   comicWord(P.x, P.y - 40, 'NO ECHO!', { col: INK.yellow, size: 20, life: .8 });
-  if (realT - msg.t > 1.2) showMsg(`${what} OFFLINE  ·  THE LAMPS' HUM DROWNS YOUR ECHO`, 1);
+  if (realT - msg.t > 1.2) showMsg(`${what} OFFLINE  ·  ${LV.id === 2 ? 'THE FURNACE ROAR' : "THE LAMPS' HUM"} DROWNS YOUR ECHO`, 1);
 }
 function lightsSpawn(n, quiet) {
   const P = player;
-  const cands = SPAWNS.map(([x, y]) => ({ x: (x + .5) * T, y: (y + .5) * T })).filter(s => { const d = Math.hypot(s.x - P.x, s.y - P.y); return d > 380 && d < 2400 && !los(P.x, P.y, s.x, s.y); }).sort((a, b) => Math.hypot(a.x - P.x, a.y - P.y) - Math.hypot(b.x - P.x, b.y - P.y)).slice(0, n + 2);
+  const cands = (LV.spawns || SPAWNS).map(([x, y]) => ({ x: (x + .5) * T, y: (y + .5) * T })).filter(s => { const d = Math.hypot(s.x - P.x, s.y - P.y); return d > 380 && d < 2400 && !los(P.x, P.y, s.x, s.y); }).sort((a, b) => Math.hypot(a.x - P.x, a.y - P.y) - Math.hypot(b.x - P.x, b.y - P.y)).slice(0, n + 2);
   for (let i = 0; i < n && cands.length; i++) {
     const sp = cands.splice((Math.random() * cands.length) | 0, 1)[0];
     const e = makeEnemy(Math.random() < .55 ? 'gunner' : 'hunter', sp.x + rand(-8, 8), sp.y + rand(-8, 8), 'r' + (MS.nid++));
@@ -3779,7 +3819,13 @@ function lightsFight(quiet) {
     comicWord(P.x, P.y - 46, '+AMMO', { col: INK.yellow, size: 18 });
   }
   lightsSpawn(quiet ? 2 : LIGHT_WAVE, quiet);
-  if (!quiet) {
+  if (!quiet && LV.id === 2) {
+    thought('Six furnaces. Every one of them roaring.'); thought("The roar is everywhere. I can hear the yard. I can't hear past it.");
+    MS.rq.unshift(MS.rq.splice(-2, 1)[0], MS.rq.pop());
+    radio('FOREMAN', "Everyone to the yard! He's in the light!"); MS.rq.unshift(MS.rq.pop());
+  }
+  if (LV.id === 2) mimicStart();
+  if (!quiet && LV.id === 1) {
     thought('Seven lights. Seven chances to die.'); thought('Every bulb is buzzing. I can hear the rooms. I just can\'t hear past them.');
     MS.rq.unshift(MS.rq.splice(-2, 1)[0], MS.rq.pop());
     radio('CONDUCTOR', 'All units. He is under the lights. Converge.'); MS.rq.unshift(MS.rq.pop()); // the PA call goes out first
@@ -3807,7 +3853,7 @@ function darkAgain() {
 }
 function lampBulletHit(b) {
   if (b.o !== 'p') return false;
-  for (const l of lamps) if (l.on && Math.hypot(l.x - b.x, l.y - b.y) < 20) { lampOut(l); return true; }
+  for (const l of lamps) if (l.on && Math.hypot(l.x - b.x, l.y - b.y) < (l.furnace ? 28 : 20)) { lampOut(l); return true; }
   return false;
 }
 function knifeLamps(P) {
@@ -4011,23 +4057,23 @@ let breakers = [];
 const PF = { t: -99, dur: .4, x: 0, y: 0, word: '', col: INK.white, cd: -99 };
 
 function buildTwists(cp) {
-  breakers = (LV.id === 1 ? BREAKERS1 : []).map(([x, y, ids], i) => ({ i, x: (x + .5) * T, y: (y + .5) * T + 8, ids, flick: rand(0, 6) }));
+  breakers = (LV.id === 1 ? BREAKERS1 : LV.id === 2 ? MAINS2 : []).map(([x, y, ids], i) => ({ i, x: (x + .5) * T, y: (y + .5) * T + 8, ids, flick: rand(0, 6) }));
   PF.t = -99;
-  if (LV.id === 1 && !(cp && (cp.phase === 'vault' || cp.phase === 'boss' || cp.phase === 'escape'))) postBreakerGuards();
+  if ((LV.id === 1 || LV.id === 2) && !(cp && ['vault', 'boss', 'escape', 'hall', 'ledger'].includes(cp.phase))) postBreakerGuards();
 }
 const brkLamps = b => b.ids.map(id => lamps[id]).filter(Boolean);
 const brkLive = b => brkLamps(b).some(l => l.on);
 function breakerOut(b) {
   if (!brkLive(b)) return;
   stats.brk = (stats.brk || 0) + 1;
-  comicWord(b.x, b.y - 18, 'KZZZRRT!', { col: INK.yellow, size: 30, burst: true, burstCol: INK.red, range: 2600, life: 1.2 });
+  comicWord(b.x, b.y - 18, LV.id === 2 ? 'SHHHUNK!' : 'KZZZRRT!', { col: INK.yellow, size: 30, burst: true, burstCol: INK.red, range: 2600, life: 1.2 });
   play('zap', { x: b.x, y: b.y, range: 1800, vol: 1 }); play('shatter', { x: b.x, y: b.y, range: 1400, vol: .6, delay: .08 });
   sparks(b.x, b.y, -PI / 2, 30, 2, 460, PI); light(b.x, b.y, 260, 2, .35, 1);
   emitSound(b.x, b.y, { hear: 950, reveal: 380, col: 2, owner: 'player', str: 1, force: true }); // everyone hears that
   shake = Math.max(shake, 7);
   const ls = brkLamps(b).filter(l => l.on);
   ls.forEach((l, k) => timers.push({ t: time + .12 + k * .14, fn: () => lampOut(l) }));
-  panelFreeze(b.x, b.y, 'KZZZRRT!', INK.yellow);
+  panelFreeze(b.x, b.y, LV.id === 2 ? 'SHHHUNK!' : 'KZZZRRT!', INK.yellow);
 }
 function breakerBulletHit(bl) {
   if (bl.o !== 'p') return false;
@@ -4066,7 +4112,7 @@ function radioCut() {
 }
 
 // ---------- thought captions: Elias, narrating like the top of a comic panel ----------
-function thought(text) { MS.rq.push({ who: 'ECHO', text, thought: true }); }
+function thought(text) { MS.rq.push({ who: 'ECHO', text, thought: true, t: time }); }
 function drawThought(S) {
   const r = MS.radio; if (!r || !r.thought) return;
   const k = realT - r.t, a = Math.max(0, Math.min(1, k / .2, (r.dur - k) / .4)); if (a <= 0) return;
@@ -4181,7 +4227,7 @@ function applyVolume() {
 const introUp = () => state === 'playing' && time < 4.2;
 callout = function (text, sub, col, big) {
   if (state === 'dead') return;
-  const c = { text, sub: sub || '', col: col ?? 0, big: !!big };
+  const c = { text, sub: sub || '', col: col ?? 0, big: !!big, at: realT };
   const q = MS.callQ || (MS.callQ = []);
   if ((MS.call && MS.call.text === text) || q.some(o => o.text === text)) return; // no repeats
   if (big) q.unshift(c); else q.push(c);
@@ -4189,6 +4235,8 @@ callout = function (text, sub, col, big) {
 };
 function updCallQ() {
   const q = MS.callQ; if (!q || !q.length || introUp()) return;
+  for (let i = q.length - 1; i >= 0; i--) if (realT - q[i].at > (q[i].big ? 6 : 3.5) && !introUp()) q.splice(i, 1); // old news
+  if (!q.length) return;
   if (MS.call && realT - MS.call.t < (MS.call.big ? 2.3 : 1.5) * (q[0].big && !MS.call.big ? .45 : 1)) return; // a big one cuts a small one short
   MS.call = { ...q.shift(), t: realT };
 }
@@ -4205,24 +4253,24 @@ function drawLightTargets(S, pad) {
   const A = CARR[2], pulse = .65 + .35 * Math.sin(realT * 5);
   // counter under the objective panel
   const x0 = pad, y0 = pad + 104 * S + 50 * S, n = lamps.length;
-  text('LIGHTS', x0 + 4, y0, 11 * S, A, .85, 'left', 700, `${4 * S}px`);
+  text(LV.id === 2 ? 'FURNACES' : 'LIGHTS', x0 + 4, y0, 11 * S, A, .85, 'left', 700, `${4 * S}px`);
   for (let i = 0; i < n; i++) {
-    const l = lamps[i], cx = x0 + 74 * S + i * 21 * S, r = 6.5 * S;
+    const l = lamps[i], cx = x0 + (LV.id === 2 ? 96 : 74) * S + i * 21 * S, r = 6.5 * S;
     ctx.beginPath(); ctx.arc(cx, y0, r, 0, TAU);
     if (l.on) { ctx.fillStyle = rgba(A, .9); ctx.fill(); ctx.strokeStyle = rgba(A, .35 * pulse); ctx.lineWidth = 4; ctx.stroke(); }
     else { ctx.strokeStyle = rgba(CARR[3], .3); ctx.lineWidth = 1.4; ctx.stroke(); ctx.beginPath(); ctx.moveTo(cx - r * .6, y0 - r * .6); ctx.lineTo(cx + r * .6, y0 + r * .6); ctx.stroke(); }
   }
   const live = breakers.filter(brkLive).length;
-  if (live) text(`⚡ ${live} BREAKER${live > 1 ? 'S' : ''} — ONE SHOT, WHOLE CIRCUIT`, x0 + 4, y0 + 20 * S, 10 * S, INK.yellow, .8, 'left', 700, `${2 * S}px`);
+  if (live) text(LV.id === 2 ? `⚡ ${live} GAS MAIN${live > 1 ? 'S' : ''} — ONE VALVE, THREE FURNACES` : `⚡ ${live} BREAKER${live > 1 ? 'S' : ''} — ONE SHOT, WHOLE CIRCUIT`, x0 + 4, y0 + 20 * S, 10 * S, INK.yellow, .8, 'left', 700, `${2 * S}px`);
   // markers: brackets on screen, arrows at the edge when they're off it
   const targets = lamps.filter(l => l.on).map(l => ({ x: l.x, y: l.y, brk: false })).concat(breakers.filter(brkLive).map(b => ({ x: b.x, y: b.y, brk: true })));
   for (const t of targets) {
     const sp = worldToScreen(t.x, t.y), col = t.brk ? INK.yellow : A, m = 46;
     if (sp.x > m && sp.x < W - m && sp.y > m + 60 && sp.y < H - m - 80) {
-      const r = (t.brk ? 20 : 16) + 3 * pulse;
+      const r = (t.brk ? 20 : LV.id === 2 ? 22 : 16) + 3 * pulse;
       ctx.strokeStyle = rgba(col, .75); ctx.lineWidth = 1.6;
       for (let k = 0; k < 4; k++) { const a0 = k * PI / 2 + PI / 4; ctx.beginPath(); ctx.arc(sp.x, sp.y, r, a0 - .32, a0 + .32); ctx.stroke(); }
-      if (t.brk) text('BREAKER', sp.x, sp.y - r - 9, 10, col, .9, 'center', 700, '2px');
+      if (t.brk) text(LV.id === 2 ? 'GAS MAIN' : 'BREAKER', sp.x, sp.y - r - 9, 10, col, .9, 'center', 700, '2px');
       continue;
     }
     const e = edgeAt(sp.x, sp.y, 38);
@@ -4353,7 +4401,7 @@ drawPause = function () {
     const y = y0 + 74 * s + i * lh, fs = Math.max(11, 13 * s);
     const lit = MS.phase === 'lights' && ['Q', 'G', 'C'].includes(k);
     text(k, cx + 22 * s, y, fs, lit ? CARR[1] : CARR[0], .95, 'left', 700, `${1 * s}px`);
-    text(lit ? 'OFFLINE — the lamps\' hum drowns it' : d, cx + 128 * s, y, fs, lit ? CARR[1] : CARR[3], lit ? .8 : .7, 'left', 500, '0.5px');
+    text(lit ? (LV.id === 2 ? 'OFFLINE — the furnace roar drowns it' : 'OFFLINE — the lamps\' hum drowns it') : d, cx + 128 * s, y, fs, lit ? CARR[1] : CARR[3], lit ? .8 : .7, 'left', 500, '0.5px');
   });
 };
 
@@ -4363,7 +4411,7 @@ const TUT = [['WASD', () => MS.tut.moved], ['Q —', () => stats.pings > 0], ['H
   const dh = drawHints;
   drawHints = function () {
     if (state === 'title') return; // keep the attract feed clean behind the menu
-    if (LV.id !== 1) return dh();
+    if (LV.id !== 1) return MS.phase === 'relays' ? dh() : undefined; // yard tips are for before the furnaces
     if (MS.phase !== 'infiltrate') return;
     const P = player, t = MS.tut || (MS.tut = {});
     if (t.sx == null) { t.sx = P.x; t.sy = P.y; }
@@ -4481,6 +4529,194 @@ function hushMark(x, y, r) { // The Quiet's insignia: a closed circle, a bar thr
       ctx.fillStyle = 'rgba(255,250,230,1)'; ctx.fillRect(8.2, -1.6, 1.4, 3.2);
     }
   };
+}
+
+// =====================================================================
+//  ECHO #2 — SHE'S STILL HUMMING
+//  Same rules as the Archive: light means they see you, the roar drowns your echo,
+//  one valve kills a whole circuit. New: the Mimic, who steals voices, and a code phrase.
+// =====================================================================
+const FURN2 = [[7, 36], [32, 35], [13, 18], [26, 20], [8, 3], [54, 34]];
+const MAINS2 = [[12, 23, [0, 2, 4]], [38, 41, [1, 3, 5]]];
+const LOCK2 = LEVEL2.lockedMsg, LOCK2_FURN = 'SEALED — THE HALL DOORS RUN ON FURNACE PRESSURE · SHUT THE FURNACES';
+const MIMIC_CALLS = [ // in Marcus's own voice. Only the missing phrase gives it away.
+  { text: "Elias, the west main is down the dock corridor. It's clear. Go now.", at: [8.5, 28] },
+  { text: "Change of plan. Get to the east shed, I'm pulling you out.", at: [56, 38] },
+];
+const gates2 = lock => { for (const d of doors) if (LV.gates.some(([x, y]) => d.tx === x && d.ty === y)) { d.locked = lock; if (lock) { d.open = false; d.amt = 0; } } };
+
+// ---------- the furnaces come on ----------
+function furnacesOn() {
+  MS.phase = 'lights'; gates2(true); LV.lockedMsg = LOCK2_FURN;
+  if (player.disgT > 0) breakDisguise('light'); phantom = null;
+  playCutscene([
+    { cam: csAt(26, 20, .55), dur: 1.2 },
+    { say: ['FOREMAN', 'You cut my PA? Then hear this.'], keep: true, fn: () => lightsUp(false) },
+    { cam: csAt(13, 18, .6), say: ['MARCUS', "Engine's running. He's fired every furnace, Elias. The roar's drowning you out. Shut them down. The gas mains feed three each."], keep: true },
+    { cam: csP(1), say: ['ECHO', "Then I'll make it dark again."], keep: true },
+  ], () => { callout('FURNACES LIT', `THE ROAR DROWNS YOUR ECHO · SHUT THEM  0/${lamps.length}`, 1, true); lightsFight(false); });
+  saveCheckpoint();
+}
+function darkAgain2() {
+  MS.phase = 'hall'; LV.lockedMsg = LOCK2;
+  panelFreeze(player.x, player.y, 'COLD!', INK.yellow);
+  gates2(false);
+  callout('DARK AGAIN', 'FURNACES COLD · THE HALL IS OPEN · ECHO BACK ONLINE', 0, true);
+  emitSound(player.x, player.y, { hear: 0, reveal: 700, col: 0, owner: 'env', str: .8, force: true });
+  timers.push({ t: time + 1.4, fn: () => cutGates() });
+  saveCheckpoint();
+}
+
+// ---------- the Mimic ----------
+function mimicStart() {
+  if (MS.mimic) return;
+  const P = player;
+  const sp = LV.spawns.map(([x, y]) => ({ x: (x + .5) * T, y: (y + .5) * T })).filter(s => !los(P.x, P.y, s.x, s.y)).sort((a, b) => Math.hypot(b.x - P.x, b.y - P.y) - Math.hypot(a.x - P.x, a.y - P.y))[0];
+  if (!sp) return;
+  const e = makeEnemy('assassin', sp.x, sp.y, 'mimic');
+  e.mimic = true; e.hp = 99; e.hits = 0; e.state = 'patrol'; e.patrol = null; e.home = { x: sp.x, y: sp.y };
+  enemies.push(e); MS.mimic = e; MS.mimT = 9;
+  timers.push({ t: time + 16, fn: () => mimicCall(0) });
+  timers.push({ t: time + 52, fn: () => mimicCall(1) });
+}
+function mimicCall(i) {
+  const m = MS.mimic; if (!m || m.dead || (MS.phase !== 'lights' && MS.phase !== 'hall')) return;
+  const c = MIMIC_CALLS[i];
+  if (i === 0) radio('MIMIC', "Elias, the west main is down the dock corridor. It's clear. Go now.");
+  else radio('MIMIC', "Change of plan. Get to the east shed, I'm pulling you out.");
+  MS.rq.unshift(MS.rq.pop()); // a fake only works if it lands now
+  MS.ambush = { x: (c.at[0] + .5) * T, y: (c.at[1] + .5) * T, armed: true };
+  if (i === 0) timers.push({ t: time + 18, fn: () => { radio('MARCUS', "Engine's running, Elias. It's me. If a call doesn't say it, it isn't me."); MS.rq.unshift(MS.rq.pop()); } });
+}
+function springAmbush(a) {
+  const P = player;
+  a.armed = false;
+  for (let k = 0; k < 3; k++) {
+    const ang = Math.atan2(P.y - a.y, P.x - a.x) + PI + (k - 1) * .9, s = safeSpot(a.x + Math.cos(ang) * 190, a.y + Math.sin(ang) * 190);
+    const e = makeEnemy(k === 1 ? 'gunner' : 'hunter', s.x, s.y, 'r' + (MS.nid++));
+    e.state = 'hunt'; e.know = { x: P.x, y: P.y, t: time };
+    enemies.push(e); SFX.door(s.x, s.y);
+  }
+  panelFreeze(P.x, P.y, 'AMBUSH!', INK.red);
+  callout('AMBUSH', "NO CODE PHRASE · IT WASN'T MARCUS", 1, true);
+  thought('No phrase. I should have listened.');
+}
+function mimicVanish(e, away) {
+  const P = player;
+  sparks(e.x, e.y, 0, 22, 1, 380, PI); smoke(e.x, e.y, 6, .8); play('static', { x: e.x, y: e.y, range: 1500, vol: .6 });
+  comicWord(e.x, e.y - 28, 'GLITCH!', { col: INK.white, size: 22, burst: true, burstCol: [178, 92, 255], range: 2000 });
+  if (!away) {
+    const sp = LV.spawns.map(([x, y]) => ({ x: (x + .5) * T, y: (y + .5) * T })).filter(s => Math.hypot(s.x - P.x, s.y - P.y) > 600 && !los(P.x, P.y, s.x, s.y));
+    const s = sp[(Math.random() * sp.length) | 0] || e.home;
+    e.x = e.gx = s.x; e.y = e.gy = s.y; e.home = { x: s.x, y: s.y }; e.state = 'patrol'; e.path = null; e.know = null;
+    return;
+  }
+  e.dead = true; e.escaped = true; // gone, not killed
+  const i = enemies.indexOf(e); if (i >= 0) enemies.splice(i, 1);
+  callout('IT GOT AWAY', 'THE MIMIC IS STILL OUT THERE', 1, true);
+  thought('Run, then. I know your voice now.');
+}
+{
+  const de = damageEnemy;
+  damageEnemy = function (e, dmg, cause, silent) {
+    if (!e || !e.mimic || e.dead) return de(e, dmg, cause, silent);
+    e.hits++; e.hurtT = time; e.litS = 1.2; e.litT = time; e.gx = e.x; e.gy = e.y; e.ga = e.a;
+    hitMark = { t: realT, kill: false };
+    mimicVanish(e, e.hits >= 3);
+  };
+}
+function updEcho2(dt) {
+  const P = player; if (P.dead) return;
+  if (!MS.blindSet) { MS.blindSet = 1; MS.blind = true; MS.intel = 1; } // after the Archive, every one of them knows it's Calder
+  if (MS.phase === 'lights' && !MS.said.main) for (const b of breakers) if (brkLive(b) && Math.hypot(b.x - P.x, b.y - P.y) < 480 && los(P.x, P.y, b.x, b.y)) {
+    MS.said.main = 1; callout('GAS MAIN', "ONE VALVE SHUTS THREE FURNACES · IT'S GUARDED", 2); thought('A gas main. One valve, three furnaces. And two men standing on it.'); break;
+  }
+  const a = MS.ambush; if (a && a.armed && Math.hypot(P.x - a.x, P.y - a.y) < 230) springAmbush(a);
+  const m = MS.mimic; if (!m || m.dead) return;
+  const dm = Math.hypot(m.x - P.x, m.y - P.y);
+  if (!MS.said.mimic && dm < 460 && los(m.x, m.y, P.x, P.y)) {
+    MS.said.mimic = 1; m.litS = 1.2; m.litT = time; m.gx = m.x; m.gy = m.y; m.ga = m.a;
+    callout('THE MIMIC', 'IT STEALS SOUNDS · ITS FAKES HAVE NO HEARTBEAT', 1, true);
+  }
+  // footsteps that aren't there, closing on you
+  if ((MS.mimT -= dt) <= 0 && dm < 1500) {
+    MS.mimT = rand(9, 13);
+    for (let k = 0; k < 2; k++) {
+      const ang = rand(0, TAU), d = rand(300, 460), x = P.x + Math.cos(ang) * d, y = P.y + Math.sin(ang) * d;
+      if (passable(Math.floor(x / T), Math.floor(y / T))) addFake(x, y, 'hunter', 6, { x: P.x, y: P.y });
+    }
+  }
+  // once: her song, hummed live
+  if (!MS.said.hum && (dm < 650 || (MS.fakeAt && realT - MS.fakeAt > 12))) {
+    MS.said.hum = 1;
+    play('lena', { x: m.x, y: m.y, range: 2000, vol: .9, rev: .6, jit: 0 });
+    comicWord(m.x, m.y - 30, '♪ hm · hm · hm · hmm', { col: INK.yellow, size: 18, range: 2400, life: 2.6 });
+    m.litS = 1.2; m.litT = time; m.gx = m.x; m.gy = m.y; m.ga = m.a;
+    thought("That's not a recording. Someone's humming it live.");
+  }
+}
+
+// ---------- the Mimic, drawn: a cloaked figure, a blank white mask, a speaker for a mouth ----------
+{
+  const ep = enemyPose;
+  enemyPose = function (e, live) { const o = ep(e, live); if (e.mimic) o.kind = 'mimic'; return o; };
+  const dt = drawTorso;
+  drawTorso = function (k) {
+    if (k !== 'mimic') return dt(k);
+    dt('assassin');
+    for (let i = 0; i < 3; i++) {
+      const u = ((realT * 1.2 + i / 3) % 1);
+      ctx.strokeStyle = `rgba(235,240,255,${(1 - u) * .7})`; ctx.lineWidth = .9;
+      ctx.beginPath(); ctx.arc(3, 0, 2 + u * 7, -.9, .9); ctx.stroke();
+    }
+  };
+  const dh = drawHeadTop;
+  drawHeadTop = function (k, o) {
+    if (k !== 'mimic') return dh(k, o);
+    ctx.beginPath(); ctx.moveTo(-5, -4.6); ctx.lineTo(-12, 0); ctx.lineTo(-5, 4.6); ctx.closePath(); body(null, 1.1);
+    ctx.beginPath(); ctx.ellipse(1, 0, 7.4, 7, 0, 0, TAU); body(null, 1.5);
+    ctx.beginPath(); ctx.ellipse(4, 0, 3.8, 5.4, 0, 0, TAU); ctx.fillStyle = 'rgba(232,238,245,.95)'; ctx.fill(); // no eyes
+    ctx.strokeStyle = 'rgba(10,14,20,.9)'; ctx.lineWidth = .7; ctx.beginPath();
+    for (let i = -2; i <= 2; i++) { ctx.moveTo(5.6, i * 1.5); ctx.lineTo(7, i * 1.5); }
+    ctx.stroke();
+  };
+}
+
+// ---------- furnaces, drawn: squat boxes with a burning mouth ----------
+{
+  const dl = drawLamps;
+  drawLamps = function () {
+    if (LV.id !== 2) return dl();
+    for (const l of lamps) {
+      if (l.x < vx0 - l.r || l.x > vx1 + l.r || l.y < vy0 - l.r || l.y > vy1 + l.r) continue;
+      const fl = .82 + .18 * Math.sin(realT * 17 + l.swing) * Math.sin(realT * 5.3 + l.swing * 2);
+      if (l.on) {
+        if (!l.poly) l.poly = visPoly(l.x, l.y, l.r);
+        ctx.save(); ctx.beginPath(); const p = l.poly; ctx.moveTo(p[0], p[1]); for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i], p[i + 1]); ctx.closePath(); ctx.clip();
+        const g = ctx.createRadialGradient(l.x, l.y, 6, l.x, l.y, l.r);
+        g.addColorStop(0, `rgba(255,160,70,${.45 * fl})`); g.addColorStop(.45, `rgba(255,110,40,${.16 * fl})`); g.addColorStop(1, 'rgba(255,90,30,0)');
+        ctx.fillStyle = g; ctx.fillRect(l.x - l.r, l.y - l.r, l.r * 2, l.r * 2);
+        ctx.restore();
+      }
+      const h = .07, tx = ex(l.x, h), ty = ey(l.y, h), c = l.on ? `rgba(255,170,90,${.95 * fl})` : 'rgba(150,160,180,.35)';
+      ctx.strokeStyle = c; ctx.lineWidth = 1.5;
+      ctx.strokeRect(l.x - 17, l.y - 17, 34, 34);
+      ctx.beginPath(); for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { ctx.moveTo(l.x + sx * 17, l.y + sy * 17); ctx.lineTo(tx + sx * 14, ty + sy * 14); } ctx.stroke();
+      ctx.strokeRect(tx - 14, ty - 14, 28, 28);
+      if (l.on) {
+        ctx.fillStyle = `rgba(255,${190 + 40 * fl | 0},110,${fl})`; ctx.fillRect(tx - 9, ty - 4, 18, 8);
+        ctx.strokeStyle = `rgba(255,230,170,${fl})`; ctx.lineWidth = 1; ctx.beginPath();
+        for (let i = -1; i <= 1; i++) { const f = Math.sin(realT * 13 + i * 2 + l.swing) * 3; ctx.moveTo(tx + i * 5, ty - 4); ctx.lineTo(tx + i * 5 + f * .4, ty - 9 - Math.abs(f)); }
+        ctx.stroke();
+      } else { ctx.strokeStyle = 'rgba(150,160,180,.35)'; ctx.strokeRect(tx - 9, ty - 4, 18, 8); }
+    }
+  };
+}
+{
+  const da = darkAgain;
+  darkAgain = function () { if (LV.id === 2) return darkAgain2(); return da(); };
+  const bl = buildL2;
+  buildL2 = function (cp) { bl(cp); if (LV.id === 2) LV.lockedMsg = cp && cp.phase === 'lights' ? LOCK2_FURN : LOCK2; };
 }
 
 // =====================================================================
@@ -4987,8 +5223,8 @@ const GUN = {
   pistol: { grip: 15, len: 12, wd: 2.4 }, shotgun: { grip: 11, len: 27, wd: 2.8 }, smg: { grip: 13, len: 17, wd: 3 },
   rifle: { grip: 10, len: 31, wd: 2.6 }, heavygun: { grip: 10, len: 26, wd: 4.6 },
 };
-const KSCALE = { player: 1, jammer: 1, hound: 1, foreman: 1.62, hunter: 1, gunner: 1.02, assassin: .92, heavy: 1.3, boss: 1.55 };
-const HALFW = { player: 15.5, jammer: 15.5, hound: 8, foreman: 20, hunter: 15.5, gunner: 15.5, assassin: 13.5, heavy: 18, boss: 19 };
+const KSCALE = { mimic: .95, player: 1, jammer: 1, hound: 1, foreman: 1.62, hunter: 1, gunner: 1.02, assassin: .92, heavy: 1.3, boss: 1.55 };
+const HALFW = { mimic: 14, player: 15.5, jammer: 15.5, hound: 8, foreman: 20, hunter: 15.5, gunner: 15.5, assassin: 13.5, heavy: 18, boss: 19 };
 
 function drawGunTop(wp, G, light) {
   const L = G.len, d = G.wd, fill = light ? '#d6e3ec' : BODY;
